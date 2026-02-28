@@ -1,0 +1,66 @@
+<Window x:Class="ClientLocker.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2000/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2000/xaml"
+        Title="LabGuard Locker" 
+        WindowStyle="None" 
+        WindowState="Maximized" 
+        Topmost="True" 
+        Background="#0f172a"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    
+    <Grid>
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
+            <Border Background="rgba(30, 41, 59, 0.7)" CornerRadius="20" Padding="40">
+                <StackPanel>
+                    <TextBlock Text="LabGuard" FontSize="32" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                    <TextBlock Text="Please login to continue" Foreground="#94a3b8" HorizontalAlignment="Center" Margin="0,0,0,30"/>
+                    
+                    <TextBlock Text="Student ID" Foreground="#94a3b8" Margin="0,0,0,5"/>
+                    <TextBox x:Name="IdInput" FontSize="18" Padding="10" Margin="0,0,0,20" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>
+                    
+                    <TextBlock Text="Password" Foreground="#94a3b8" Margin="0,0,0,5"/>
+                    <PasswordBox x:Name="PasswordInput" FontSize="18" Padding="10" Margin="0,0,0,30" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>
+                    
+                    <Button Content="Login" Click="Login_Click" Background="#4f46e5" Foreground="White" FontSize="18" FontWeight="Bold" Padding="15" BorderThickness="0" Margin="0,0,0,10">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="10"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+
+                    <Button Content="Change Username / Password" Click="ChangeProfile_Click" Background="Transparent" Foreground="#94a3b8" FontSize="14" BorderThickness="0" Cursor="Hand"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- Profile Change Overlay -->
+        <Border x:Name="ProfileOverlay" Visibility="Collapsed" Background="#0f172a" Grid.RowSpan="2">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
+                <Border Background="rgba(30, 41, 59, 0.7)" CornerRadius="20" Padding="40">
+                    <StackPanel>
+                        <TextBlock Text="Modify Profile" FontSize="24" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,30"/>
+                        
+                        <TextBlock Text="Current Student ID" Foreground="#94a3b8" Margin="0,0,0,5"/>
+                        <TextBox x:Name="OldIdInput" FontSize="16" Padding="10" Margin="0,0,0,15" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>
+                        
+                        <TextBlock Text="Current Password" Foreground="#94a3b8" Margin="0,0,0,5"/>
+                        <PasswordBox x:Name="OldPassInput" FontSize="16" Padding="10" Margin="0,0,0,25" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>
+
+                        <Separator Background="#334155" Margin="0,0,0,25"/>
+
+                        <TextBlock Text="New Student ID (or keep same)" Foreground="#94a3b8" Margin="0,0,0,5"/>
+                        <TextBox x:Name="NewIdInput" FontSize="16" Padding="10" Margin="0,0,0,15" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>
+                        
+                        <TextBlock Text="New Password" Foreground="#94a3b8" Margin="0,0,0,5"/>
+                        <PasswordBox x:Name="NewPassInput" FontSize="16" Padding="10" Margin="0,0,0,30" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>
+
+                        <Button Content="Update Credentials" Click="UpdateProfile_Click" Background="var(--success)" Foreground="White" FontSize="16" FontWeight="Bold" Padding="12" BorderThickness="0" Margin="0,0,0,10"/>
+                        <Button Content="Cancel" Click="CancelProfile_Click" Background="Transparent" Foreground="#94a3b8" FontSize="14" BorderThickness="0"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,86 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Windows;
+
+namespace LabGuardInstaller
+{
+    public partial class App : Application
+    {
+        private const string DotNetDownloadUrl = "https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-6.0.28-windows-x64-installer";
+        private const string AppFolderName = "LabGuard";
+
+        protected override void OnStartup(StartupEventArgs e)
+        {
+            base.OnStartup(e);
+
+            if (!CheckDotNetRuntime())
+            {
+                var result = MessageBox.Show(
+                    "This software requires the .NET 6.0 Desktop Runtime to run. \n\nWould you like to download and install it now?",
+                    "Requirement Missing",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    Process.Start(new ProcessStartInfo(DotNetDownloadUrl) { UseShellExecute = true });
+                }
+                Current.Shutdown();
+                return;
+            }
+
+            InstallAndLaunch();
+        }
+
+        private bool CheckDotNetRuntime()
+        {
+            try
+            {
+                // Simple way to check if .NET 6.0 is installed by checking registry or running a command
+                // For a bootstrapper, we can try to check the Program Files folder
+                return Directory.Exists(@"C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App\6.0");
+            }
+            catch { return false; }
+        }
+
+        private void InstallAndLaunch()
+        {
+            string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            string installPath = Path.Combine(programData, AppFolderName);
+
+            try
+            {
+                if (!Directory.Exists(installPath))
+                    Directory.CreateDirectory(installPath);
+
+                // In a real scenario, the installer would contain the app as an embedded resource
+                // For this demonstration, we'll assume the files are in a 'payload' subfolder
+                string sourcePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "payload");
+                
+                if (Directory.Exists(sourcePath))
+                {
+                    foreach (string file in Directory.GetFiles(sourcePath))
+                    {
+                        string dest = Path.Combine(installPath, Path.GetFileName(file));
+                        File.Copy(file, dest, true);
+                    }
+                    
+                    MessageBox.Show("LabGuard has been installed successfully! It will now launch.", "Installation Complete");
+                    Process.Start(Path.Combine(installPath, "ClientLocker.exe"));
+                }
+                else
+                {
+                    MessageBox.Show("Installation source files not found. Please ensure the 'payload' folder is present.", "Error");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Installation failed: " + ex.Message);
+            }
+
+            Current.Shutdown();
+        }
+    }
+}
