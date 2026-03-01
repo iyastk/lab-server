@@ -14,6 +14,7 @@ namespace ClientLocker
         private System.Windows.Threading.DispatcherTimer _sessionTimer;
         private StudentData? _currentStudent = null;
         private string _pcName = Environment.MachineName;
+        private bool _allowShutdown = false;
 
         public MainWindow()
         {
@@ -100,6 +101,8 @@ namespace ClientLocker
         {
             if (msg == WM_QUERYENDSESSION || msg == WM_ENDSESSION)
             {
+                if (_allowShutdown) return IntPtr.Zero; // Allow OS shutdown
+                
                 // Only block if a student is active
                 if (_currentStudent != null)
                 {
@@ -158,11 +161,13 @@ namespace ClientLocker
                                 Application.Current.Dispatcher.Invoke(() => UnlockPC());
                                 break;
                             case "shutdown":
+                                _allowShutdown = true;
                                 Process.Start("shutdown", "/s /t 10"); // 10s delay to show message
                                 Application.Current.Dispatcher.Invoke(() => 
                                     MessageBox.Show("This PC will shutdown in 10 seconds (Admin command).", "LabGuard"));
                                 break;
                             case "restart":
+                                _allowShutdown = true;
                                 Process.Start("shutdown", "/r /t 10");
                                 Application.Current.Dispatcher.Invoke(() =>
                                     MessageBox.Show("This PC will restart in 10 seconds (Admin command).", "LabGuard"));
@@ -173,6 +178,12 @@ namespace ClientLocker
                                 {
                                     await _firebase.UpdateScreenCapture(_pcName, base64);
                                 }
+                                break;
+                            case "livestream_start":
+                                _firebase.StartLiveStream(_pcName);
+                                break;
+                            case "livestream_stop":
+                                _firebase.StopLiveStream();
                                 break;
                             default:
                                 if (command.StartsWith("notify|", StringComparison.OrdinalIgnoreCase))

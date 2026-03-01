@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc } from 'firebase/firestore';
 import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2 } from 'lucide-react';
 
-const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand, toggleLiveView, setLightbox }) => (
+const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand, toggleLiveView, setLightbox, removeStation }) => (
     <div className="glass-panel" style={{
         padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px',
         ...(isLive ? { borderColor: 'rgba(239,68,68,0.5)', boxShadow: '0 0 0 2px rgba(239,68,68,0.2)' } : {})
@@ -88,6 +88,12 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
             <button className="btn" title="Shutdown PC" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}
                 onClick={() => { if (window.confirm(`Shutdown ${station.pcName || station.id}?`)) sendCommand(station.id, 'shutdown'); }}>
                 <Power size={16} />
+            </button>
+
+            {/* Remove Station */}
+            <button className="btn" title="Remove Station" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
+                onClick={() => { if (window.confirm(`Remove ${station.pcName || station.id} from the dashboard entirely?`)) removeStation(station.id); }}>
+                <Trash2 size={16} />
             </button>
         </div>
 
@@ -329,6 +335,7 @@ const Monitoring = () => {
                         sendCommand={sendCommand}
                         toggleLiveView={toggleLiveView}
                         setLightbox={setLightbox}
+                        removeStation={removeStation}
                     />
                 ))}
 

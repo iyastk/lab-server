@@ -184,7 +184,8 @@ namespace ClientLocker
         {
             try
             {
-                var response = await _http.GetAsync(BaseUrl + "stations/" + pcName);
+                // Append _t=ticks to prevent HTTP GET caching by the OS
+                var response = await _http.GetAsync(BaseUrl + "stations/" + pcName + "?_t=" + DateTime.UtcNow.Ticks);
                 if (!response.IsSuccessStatusCode) return null;
 
                 var content = await response.Content.ReadAsStringAsync();
@@ -207,6 +208,28 @@ namespace ClientLocker
             var body = new { fields = new { pendingCommand = new { stringValue = "" } } };
             var content = new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json");
             await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=pendingCommand", content);
+        }
+
+        private System.Timers.Timer? _liveTimer;
+        public void StartLiveStream(string pcName)
+        {
+            if (_liveTimer == null)
+            {
+                _liveTimer = new System.Timers.Timer(5000);
+                _liveTimer.Elapsed += async (s, e) => {
+                    string base64 = CaptureScreenBase64();
+                    if (!string.IsNullOrEmpty(base64))
+                    {
+                        await UpdateScreenCapture(pcName, base64);
+                    }
+                };
+            }
+            _liveTimer.Start();
+        }
+
+        public void StopLiveStream()
+        {
+            _liveTimer?.Stop();
         }
 
         public async Task<bool> GetGlobalSecuritySettings()
