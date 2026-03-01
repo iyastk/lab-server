@@ -88,7 +88,7 @@ namespace ClientLocker
             catch { }
         }
 
-        public async Task UpdateStationStatus(string pcName, string status, string user = "", string currentApp = "")
+        public async Task UpdateStationStatus(string pcName, string status, string studentId = "", string currentApp = "")
         {
             try
             {
@@ -98,7 +98,7 @@ namespace ClientLocker
                     {
                         status = new { stringValue = status },
                         pcName = new { stringValue = pcName },
-                        currentUser = new { stringValue = user },
+                        currentUser = new { stringValue = studentId },
                         currentApp = new { stringValue = currentApp },
                         lastSeen = new { timestampValue = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ") }
                     }
@@ -107,27 +107,61 @@ namespace ClientLocker
                 var json = JsonConvert.SerializeObject(body);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                // Using patch (Update) - if document doesn't exist, this might fail or create depending on query params
-                // For simplicity in REST, we'll try to update specific document
                 await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=status&updateMask.fieldPaths=currentUser&updateMask.fieldPaths=currentApp&updateMask.fieldPaths=lastSeen", content);
             }
-            catch { /* Ignore status update failures */ }
+            catch { }
         }
 
-        public async Task UpdateStationField(string pcName, string fieldName, string value)
+        public async Task<string[]> GetGlobalBannedWords()
+        {
+            // Assuming a helper method GetDocument exists or needs to be implemented
+            // For now, directly fetching from settings/global
+            try
+            {
+                var response = await _http.GetAsync(BaseUrl + "settings/global");
+                if (!response.IsSuccessStatusCode) return Array.Empty<string>();
+
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                var fields = data["fields"];
+
+                string raw = fields?["bannedKeywords"]?["stringValue"]?.ToString() ?? "";
+                return raw.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToArray();
+            }
+            catch { return Array.Empty<string>(); }
+        }
+
+        public async Task UpdateStationField(string pcName, string fieldName, object value)
         {
             try
             {
-                var fieldBody = new System.Collections.Generic.Dictionary<string, object>
+                var body = new
                 {
-                    { fieldName, new { stringValue = value } }
+                    fields = new Dictionary<string, object>
+                    {
+                        { fieldName, new { stringValue = value.ToString() } }
+                    }
                 };
-                var body = new { fields = fieldBody };
                 var json = JsonConvert.SerializeObject(body);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
                 await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=" + fieldName, content);
             }
             catch { }
+        }
+
+        public async Task<string?> DownloadFile(string url, string fileName)
+        {
+            try
+            {
+                string downloadsPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "LabGuard");
+                if (!System.IO.Directory.Exists(downloadsPath)) System.IO.Directory.CreateDirectory(downloadsPath);
+
+                string filePath = System.IO.Path.Combine(downloadsPath, fileName);
+                var data = await _http.GetByteArrayAsync(url);
+                System.IO.File.WriteAllBytes(filePath, data);
+                return filePath;
+            }
+            catch { return null; }
         }
 
         public async Task LogActivity(string studentId, string pcName, string activity)
@@ -348,7 +382,6 @@ namespace ClientLocker
                 int screenWidth = (int)System.Windows.SystemParameters.PrimaryScreenWidth;
                 int screenHeight = (int)System.Windows.SystemParameters.PrimaryScreenHeight;
 
-                // Scale down if larger than 1280px width
                 int targetWidth = screenWidth;
                 int targetHeight = screenHeight;
                 if (screenWidth > 1280)
@@ -368,14 +401,12 @@ namespace ClientLocker
                     {
                         using (var ms = new System.IO.MemoryStream())
                         {
-                            // Save as JPEG with 60% quality
                             var encoder = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
                             var parameters = new System.Drawing.Imaging.EncoderParameters(1);
                             parameters.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 60L);
 
                             resized.Save(ms, encoder, parameters);
-                            byte[] byteImage = ms.ToArray();
-                            return Convert.ToBase64String(byteImage);
+                            return Convert.ToBase64String(ms.ToArray());
                         }
                     }
                 }

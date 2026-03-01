@@ -151,6 +151,30 @@ body {
   gap: 0;
 }
 
+.stations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 20px;
+}
+
+.stations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stations-list .glass-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+}
+
+.stations-list .station-image-container {
+  width: 120px;
+  height: 70px;
+}
+
 /* ── Badge ──────────────────────────────────────────────── */
 .badge {
   display: inline-flex;

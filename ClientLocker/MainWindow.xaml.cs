@@ -15,6 +15,7 @@ namespace ClientLocker
         private StudentData? _currentStudent = null;
         private string _pcName = Environment.MachineName;
         private bool _allowShutdown = false;
+        private bool _isLocked = true; // Default state
         
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool SetCursorPos(int x, int y);
@@ -36,28 +37,33 @@ namespace ClientLocker
             
             _monitor.OnAppChanged += async (activity) => {
                 string studentId = _currentStudent?.Id ?? "";
-                
-                // activity is "Category|DetailedInfo"
                 var parts = activity.Split('|');
-                string category = parts[0];
                 string detailedInfo = parts.Length > 1 ? parts[1] : activity;
 
-                await _firebase.UpdateStationStatus(_pcName, "online", studentId, detailedInfo);
+                await _firebase.UpdateStationStatus(_pcName, _isLocked ? "frozen" : "online", studentId, detailedInfo);
                 if (!string.IsNullOrEmpty(studentId))
                 {
                     await _firebase.LogActivity(studentId, _pcName, activity);
                 }
             };
 
+            _monitor.OnViolationDetected += async (keyword) => {
+                await _firebase.LogActivity(_currentStudent?.Id ?? "System", _pcName, $"VIOLATION|Banned Word: {keyword}");
+                Application.Current.Dispatcher.Invoke(() => {
+                    LockPC();
+                    MessageBox.Show($"Access to '{keyword}' is restricted by the administrator.", "LabGuard Security Violation", MessageBoxButton.OK, MessageBoxImage.Warning);
+                });
+            };
+
             _sessionTimer = new System.Windows.Threading.DispatcherTimer();
             _sessionTimer.Interval = TimeSpan.FromSeconds(1);
             _sessionTimer.Tick += SessionTimer_Tick;
 
-            // Start listening for remote commands
-            StartRemoteCommandListener();
-
-            // Register for startup (Optional: requires admin)
-            RegisterForStartup();
+            // Heartbeat timer (optimized throttling)
+            var heartbeatTimer = new System.Windows.Threading.DispatcherTimer();
+            heartbeatTimer.Interval = TimeSpan.FromSeconds(2);
+            heartbeatTimer.Tick += HeartbeatTimer_Tick;
+            heartbeatTimer.Start();
 
             // Periodic sync of offline logs
             var syncTimer = new System.Windows.Threading.DispatcherTimer();
@@ -65,54 +71,48 @@ namespace ClientLocker
             syncTimer.Tick += async (s, e) => await _firebase.SyncOfflineLogs();
             syncTimer.Start();
 
-            // Heartbeat timer (every 60s even if no app change)
-            var heartbeatTimer = new System.Windows.Threading.DispatcherTimer();
-            heartbeatTimer.Interval = TimeSpan.FromSeconds(60);
-            heartbeatTimer.Tick += async (s, e) => {
-                if (_currentStudent != null)
-                {
-                    var parts = _monitor.LastApp.Split('|');
-                    string detailedInfo = parts.Length > 1 ? parts[1] : _monitor.LastApp;
-                    await _firebase.UpdateStationStatus(_pcName, "online", _currentStudent.Id, detailedInfo);
-                }
-                else
-                {
-                    await _firebase.UpdateStationStatus(_pcName, "offline");
-                }
+            // Fetch global settings periodically
+            var settingsTimer = new System.Windows.Threading.DispatcherTimer();
+            settingsTimer.Interval = TimeSpan.FromMinutes(5);
+            settingsTimer.Tick += async (s, e) => {
+                var banned = await _firebase.GetGlobalBannedWords();
+                if (banned != null) _monitor.BannedKeywords = banned;
+                _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
             };
-            heartbeatTimer.Start();
+            settingsTimer.Start();
+            
+            // Initial fetch
+            Task.Run(async () => {
+                var banned = await _firebase.GetGlobalBannedWords();
+                if (banned != null) _monitor.BannedKeywords = banned;
+            });
+
+            RegisterForStartup();
         }
 
         private void RegisterForStartup()
         {
             try
             {
-                // Use ProcessPath (available in .NET 6+)
-                var path = Environment.ProcessPath;
-                if (string.IsNullOrEmpty(path)) path = System.Reflection.Assembly.GetExecutingAssembly().Location;
-
-                // Try HKLM first (requires admin)
+                var path = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
                 try
                 {
                     using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
                     {
                         key?.SetValue("LabGuard", $"\"{path}\"");
-                        return; // Successfully set HKLM
+                        return;
                     }
                 }
-                catch { /* Ignore and fallback to HKCU */ }
+                catch { }
 
-                // Fallback to CurrentUser
                 using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
                 {
                     key?.SetValue("LabGuard", $"\"{path}\"");
                 }
             }
-            catch { /* Final fallback, nothing we can do */ }
+            catch { }
         }
 
-        // Block student-initiated shutdown/restart
-        // Return FALSE to WM_QUERYENDSESSION to cancel
         protected override void OnSourceInitialized(EventArgs e)
         {
             base.OnSourceInitialized(e);
@@ -127,15 +127,13 @@ namespace ClientLocker
         {
             if (msg == WM_QUERYENDSESSION || msg == WM_ENDSESSION)
             {
-                if (_allowShutdown) return IntPtr.Zero; // Allow OS shutdown
-                
-                // Only block if a student is active
+                if (_allowShutdown) return IntPtr.Zero;
                 if (_currentStudent != null)
                 {
                     handled = true;
                     Application.Current.Dispatcher.Invoke(() => 
-                        MessageBox.Show("Shutdown is not allowed while a session is active.\nContact Lab Admin.", "LabGuard - Blocked"));
-                    return new IntPtr(0); // Cancel shutdown
+                        MessageBox.Show("Shutdown is not allowed while a session is active.", "LabGuard - Blocked"));
+                    return new IntPtr(0);
                 }
             }
             return IntPtr.Zero;
@@ -153,15 +151,41 @@ namespace ClientLocker
                 LockPC();
             }
 
-            // Sync to Firebase every 60 seconds
             if (_currentStudent.WeeklyRemaining % 60 == 0)
             {
                 await _firebase.UpdateStudentTime(_currentStudent.Id, _currentStudent.WeeklyRemaining, _currentStudent.DailyRemaining);
             }
         }
 
+        private DateTime _lastHeartbeat = DateTime.MinValue;
+        private string _lastStatus = "";
+        private string _lastReportedApp = "";
+
+        private async void HeartbeatTimer_Tick(object? sender, EventArgs e)
+        {
+            string currentStatus = _isLocked ? "frozen" : "online";
+            bool statusChanged = currentStatus != _lastStatus || _monitor.LastApp != _lastReportedApp;
+            bool timeElapsed = (DateTime.Now - _lastHeartbeat).TotalSeconds >= 30;
+
+            if (statusChanged || timeElapsed)
+            {
+                _lastStatus = currentStatus;
+                _lastReportedApp = _monitor.LastApp;
+                _lastHeartbeat = DateTime.Now;
+
+                await _firebase.UpdateStationStatus(_pcName, currentStatus, _currentStudent?.Id ?? "", _monitor.LastApp);
+                
+                string command = await _firebase.GetPendingCommand(_pcName);
+                if (!string.IsNullOrEmpty(command))
+                {
+                    HandleCommand(command);
+                }
+            }
+        }
+
         private void LockPC()
         {
+            _isLocked = true;
             _sessionTimer.Stop();
             _monitor.Stop();
             this.Show();
@@ -169,96 +193,78 @@ namespace ClientLocker
             _hook.Hook();
         }
 
-        private async void StartRemoteCommandListener()
+        private async void HandleCommand(string command)
         {
-            while (true)
+            try
             {
-                try
+                switch (command.ToLower())
                 {
-                    string? command = await _firebase.GetPendingCommand(_pcName);
-                    if (!string.IsNullOrEmpty(command))
-                    {
-                        switch (command.ToLower())
+                    case "lock":
+                        Application.Current.Dispatcher.Invoke(() => LockPC());
+                        break;
+                    case "unlock":
+                        Application.Current.Dispatcher.Invoke(() => UnlockPC());
+                        break;
+                    case "shutdown":
+                        _allowShutdown = true;
+                        Process.Start("shutdown", "/s /t 10");
+                        break;
+                    case "restart":
+                        _allowShutdown = true;
+                        Process.Start("shutdown", "/r /t 10");
+                        break;
+                    case "screenshot":
+                        string base64 = _firebase.CaptureScreenBase64();
+                        if (!string.IsNullOrEmpty(base64))
                         {
-                            case "lock":
-                                Application.Current.Dispatcher.Invoke(() => LockPC());
-                                break;
-                            case "unlock":
-                                Application.Current.Dispatcher.Invoke(() => UnlockPC());
-                                break;
-                            case "shutdown":
-                                _allowShutdown = true;
-                                Process.Start("shutdown", "/s /t 10"); // 10s delay to show message
-                                Application.Current.Dispatcher.Invoke(() => 
-                                    MessageBox.Show("This PC will shutdown in 10 seconds (Admin command).", "LabGuard"));
-                                break;
-                            case "restart":
-                                _allowShutdown = true;
-                                Process.Start("shutdown", "/r /t 10");
-                                Application.Current.Dispatcher.Invoke(() =>
-                                    MessageBox.Show("This PC will restart in 10 seconds (Admin command).", "LabGuard"));
-                                break;
-                            case "screenshot":
-                                string base64 = _firebase.CaptureScreenBase64();
-                                if (!string.IsNullOrEmpty(base64))
-                                {
-                                    await _firebase.UpdateScreenCapture(_pcName, base64);
-                                }
-                                break;
-                            case "livestream_start":
-                                _firebase.StartLiveStream(_pcName);
-                                break;
-                            case "livestream_stop":
-                                _firebase.StopLiveStream();
-                                break;
-                            case "internet_block":
-                                SetInternetAccess(false);
-                                break;
-                            case "internet_allow":
-                                SetInternetAccess(true);
-                                break;
-                            case string s when s.StartsWith("mouse_click|"):
-                                try {
-                                    var coords = command.Split('|');
-                                    int x = int.Parse(coords[1]);
-                                    int y = int.Parse(coords[2]);
-                                    
-                                    // Coordinates from dashboard are 0-1000 representing screen %
-                                    int screenX = (int)(x * System.Windows.SystemParameters.PrimaryScreenWidth / 1000.0);
-                                    int screenY = (int)(y * System.Windows.SystemParameters.PrimaryScreenHeight / 1000.0);
-                                    
-                                    Application.Current.Dispatcher.Invoke(() => {
-                                        SetCursorPos(screenX, screenY);
-                                        mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP, screenX, screenY, 0, 0);
-                                    });
-                                } catch { }
-                                break;
-                            default:
-                                if (command.StartsWith("notify|", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    string msg = command.Substring(7);
-                                    Application.Current.Dispatcher.Invoke(() => {
-                                        MessageBox.Show(msg, "LabGuard Notification");
-                                        if (msg.Contains("granted") && _currentStudent != null)
-                                        {
-                                            RefreshStudentData();
-                                        }
-                                    });
-                                }
-                                break;
+                            await _firebase.UpdateScreenCapture(_pcName, base64);
                         }
-                    }
+                        break;
+                    case "livestream_start":
+                        _firebase.StartLiveStream(_pcName);
+                        break;
+                    case "livestream_stop":
+                        _firebase.StopLiveStream();
+                        break;
+                    case string s when s.StartsWith("announcement|"):
+                        string announcementMsg = command.Substring(13);
+                        Application.Current.Dispatcher.Invoke(() => {
+                            var announcement = new AnnouncementWindow(announcementMsg);
+                            announcement.ShowDialog();
+                        });
+                        break;
+                    case string s when s.StartsWith("file_transfer|"):
+                        try {
+                            var parts = command.Split('|');
+                            string url = parts[1];
+                            string fileName = parts[2];
+                            string? localPath = await _firebase.DownloadFile(url, fileName);
+                            if (localPath != null) {
+                                Application.Current.Dispatcher.Invoke(() => {
+                                    MessageBox.Show($"Administrator sent a file: {fileName}", "File Received");
+                                    Process.Start("explorer.exe", $"/select,\"{localPath}\"");
+                                });
+                            }
+                        } catch { }
+                        break;
+                    case "internet_block":
+                        SetInternetAccess(false);
+                        break;
+                    case "internet_allow":
+                        SetInternetAccess(true);
+                        break;
                 }
-                catch { }
-                await Task.Delay(2000); // Poll every 2 seconds
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Error handling command: " + ex.Message);
             }
         }
 
         private async void RefreshStudentData()
         {
             if (_currentStudent == null) return;
-            // Re-validate or fetch student to get new time
-            var updated = await _firebase.ValidateStudent(_currentStudent.Id, ""); // Need to handle passwordless fetch or store password
+            var updated = await _firebase.ValidateStudent(_currentStudent.Id, "");
             if (updated != null)
             {
                 _currentStudent.WeeklyRemaining = updated.WeeklyRemaining;
@@ -271,37 +277,28 @@ namespace ClientLocker
             string id = IdInput.Text;
             string password = PasswordInput.Password;
 
-            // Simple validation for admin
             if ((id == "admin" && password == "admin123") || (id == "Admin" && password == "nopassword"))
             {
                 _hook.Unhook();
                 this.Hide();
-                if (id == "Admin") {
-                    OpenUserDashboard(new StudentData { Id = "System Admin", WeeklyRemaining = 9999, DailyRemaining = 9999 });
-                }
-                MessageBox.Show("Welcome, Admin! (System unlocked)");
+                if (id == "Admin") OpenUserDashboard(new StudentData { Id = "System Admin", WeeklyRemaining = 9999, DailyRemaining = 9999 });
+                MessageBox.Show("Welcome, Admin!");
             }
             else
             {
-                // Verify with Firebase
                 var student = await _firebase.ValidateStudent(id, password);
                 if (student != null)
                 {
                     if (student.WeeklyRemaining <= 0 || student.DailyRemaining <= 0)
                     {
-                        MessageBox.Show("Your time quota has expired (Weekly or Daily). Please contact Admin.", "Access Denied", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        MessageBox.Show("Your time quota has expired.");
                         return;
                     }
-
                     _currentStudent = student;
                     OpenUserDashboard(student);
                     UnlockPC();
-                    MessageBox.Show($"Welcome, {id}!");
                 }
-                else
-                {
-                    MessageBox.Show("Invalid Student ID or Password", "Login Failed", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                else MessageBox.Show("Invalid ID or Password");
             }
         }
 
@@ -309,24 +306,56 @@ namespace ClientLocker
         {
             Application.Current.Dispatcher.Invoke(() => {
                 var dashboard = new UserDashboard(student, () => {
-                    // This is the onLogout callback
                     _currentStudent = null;
                     LockPC();
-                    this.Show();
-                    this.Activate();
                 });
                 dashboard.Show();
             });
         }
 
+        private void SetInternetAccess(bool allow)
+        {
+            try
+            {
+                string appPath = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+                RunHiddenCommand("netsh", $"advfirewall firewall add rule name=\"LabGuard_Allow\" dir=out action=allow program=\"{appPath}\" enable=yes");
+                
+                if (allow) RunHiddenCommand("netsh", "advfirewall firewall delete rule name=\"LabGuard_BlockWeb\"");
+                else
+                {
+                    RunHiddenCommand("netsh", "advfirewall firewall delete rule name=\"LabGuard_BlockWeb\"");
+                    RunHiddenCommand("netsh", "advfirewall firewall add rule name=\"LabGuard_BlockWeb\" dir=out action=block protocol=TCP remoteport=80,443");
+                }
+                _firebase.UpdateStationField(_pcName, "isInternetBlocked", (!allow).ToString().ToLower());
+            }
+            catch { }
+        }
+
+        private void RunHiddenCommand(string fileName, string args)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo(fileName, args) { CreateNoWindow = true, UseShellExecute = false, Verb = "runas" };
+                Process.Start(psi)?.WaitForExit();
+            }
+            catch { }
+        }
+
+        private async void UnlockPC()
+        {
+            _isLocked = false;
+            _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
+            _sessionTimer.Start();
+            _monitor.Start();
+            this.Hide();
+            _hook.Unhook();
+        }
+
         private void ChangeProfile_Click(object sender, RoutedEventArgs e)
         {
             ProfileOverlay.Visibility = Visibility.Visible;
-        }
-
-        private void CancelProfile_Click(object sender, RoutedEventArgs e)
-        {
-            ProfileOverlay.Visibility = Visibility.Collapsed;
+            OldIdInput.Text = IdInput.Text;
+            OldPassInput.Password = PasswordInput.Password;
         }
 
         private async void UpdateProfile_Click(object sender, RoutedEventArgs e)
@@ -336,85 +365,33 @@ namespace ClientLocker
             string newId = NewIdInput.Text;
             string newPass = NewPassInput.Password;
 
-            if (string.IsNullOrEmpty(oldId) || string.IsNullOrEmpty(oldPass) || string.IsNullOrEmpty(newId) || string.IsNullOrEmpty(newPass))
+            if (string.IsNullOrEmpty(newId) || string.IsNullOrEmpty(newPass))
             {
-                MessageBox.Show("Please fill all fields.");
+                MessageBox.Show("Please enter new credentials.");
                 return;
             }
 
             bool success = await _firebase.UpdateStudentProfile(oldId, oldPass, newId, newPass);
             if (success)
             {
-                MessageBox.Show("Profile updated successfully! You can now login with your new credentials.");
+                MessageBox.Show("Profile updated successfully! Please login with your new credentials.");
                 ProfileOverlay.Visibility = Visibility.Collapsed;
+                IdInput.Text = newId;
+                PasswordInput.Password = newPass;
             }
             else
             {
-                MessageBox.Show("Failed to update profile. Please verify your current ID and Password.");
+                MessageBox.Show("Failed to update profile. Please check your current credentials.");
             }
         }
 
-        private void SetInternetAccess(bool allow)
+        private void CancelProfile_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // We use netsh to manage firewall rules. 
-                // Rule 1: Always allow LabGuard (our app) to ensure we don't lock ourselves out of Firebase
-                string appPath = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
-                
-                // Ensure Allow rule for LabGuard exists
-                RunHiddenCommand("netsh", $"advfirewall firewall add rule name=\"LabGuard_Allow\" dir=out action=allow program=\"{appPath}\" enable=yes");
-                
-                if (allow)
-                {
-                    // Remove the block rules
-                    RunHiddenCommand("netsh", "advfirewall firewall delete rule name=\"LabGuard_BlockWeb\"");
-                }
-                else
-                {
-                    // Add block rules for HTTP (80) and HTTPS (443) for everything EXCEPT LabGuard
-                    // We delete first to avoid duplicates
-                    RunHiddenCommand("netsh", "advfirewall firewall delete rule name=\"LabGuard_BlockWeb\"");
-                    RunHiddenCommand("netsh", "advfirewall firewall add rule name=\"LabGuard_BlockWeb\" dir=out action=block protocol=TCP remoteport=80,443");
-                }
-                
-                _firebase.UpdateStationField(_pcName, "isInternetBlocked", (!allow).ToString().ToLower());
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Firewall error: " + ex.Message);
-            }
-        }
-
-        private void RunHiddenCommand(string fileName, string args)
-        {
-            try
-            {
-                ProcessStartInfo psi = new ProcessStartInfo(fileName, args)
-                {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    Verb = "runas" // Request elevation if needed, though installer usually handles this
-                };
-                Process.Start(psi)?.WaitForExit();
-            }
-            catch { }
-        }
-
-        private async void UnlockPC()
-        {
-            _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
-
-            _sessionTimer.Start();
-            _monitor.Start();
-            this.Hide();
-            _hook.Unhook();
+            ProfileOverlay.Visibility = Visibility.Collapsed;
         }
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
-            // Prevent closing unless authorized
-            // e.Cancel = true; 
             base.OnClosing(e);
         }
     }

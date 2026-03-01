@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc, getDoc } from 'firebase/firestore';
-import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock } from 'lucide-react';
+import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock, Megaphone, Send, FileUp, Shield, Settings } from 'lucide-react';
 
 const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand, toggleLiveView, setLightbox, removeStation }) => (
     <div className="glass-panel" style={{
@@ -98,6 +98,18 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
                 {station.isInternetBlocked === 'true' ? <Globe size={16} /> : <GlobeLock size={16} />}
             </button>
 
+            {/* Announcement */}
+            <button className="btn" title="Send Announcement" style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--primary)' }}
+                onClick={() => sendAnnouncement(station.id)}>
+                <Megaphone size={16} />
+            </button>
+
+            {/* File Transfer */}
+            <button className="btn" title="Send File" style={{ background: 'rgba(34,197,94,0.1)', color: 'var(--success)' }}
+                onClick={() => handleFileTransfer(station.id)}>
+                <FileUp size={16} />
+            </button>
+
             {/* Remove Station */}
             <button className="btn" title="Remove Station" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
                 onClick={() => { if (window.confirm(`Remove ${station.pcName || station.id} from the dashboard entirely?`)) removeStation(station.id); }}>
@@ -161,13 +173,23 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
 const Monitoring = () => {
     const [stations, setStations] = useState([]);
     const [totalStudents, setTotalStudents] = useState(0);
-    const [liveStations, setLiveStations] = useState(new Set()); // stations in live mode
-    const [lightbox, setLightbox] = useState(null); // { pcName, src } for fullscreen view
+    const [liveStations, setLiveStations] = useState(new Set());
+    const [lightbox, setLightbox] = useState(null);
+    const [localServerIp, setLocalServerIp] = useState(window.location.hostname === 'localhost' ? 'localhost' : '');
+    const [isUploading, setIsUploading] = useState(false);
+    const [securitySettings, setSecuritySettings] = useState({ bannedKeywords: '', blockUninstalls: true });
+    const [showSecurityModal, setShowSecurityModal] = useState(false);
+    const [isGridView, setIsGridView] = useState(true);
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, 'stations'), (snapshot) => {
             const stationList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setStations(stationList);
+        });
+
+        // Fetch security settings
+        getDoc(doc(db, 'settings', 'global')).then(snap => {
+            if (snap.exists()) setSecuritySettings(snap.data());
         });
 
         const studentsUnsubscribe = onSnapshot(collection(db, 'students'), (snapshot) => {
@@ -187,7 +209,11 @@ const Monitoring = () => {
         offline: stations.filter(s => s.status !== 'online').length
     };
 
+    const [isCommandPending, setIsCommandPending] = useState(false);
+
     const sendCommand = useCallback(async (stationId, command) => {
+        if (isCommandPending) return;
+        setIsCommandPending(true);
         try {
             await updateDoc(doc(db, 'stations', stationId), {
                 pendingCommand: command,
@@ -195,8 +221,10 @@ const Monitoring = () => {
             });
         } catch (err) {
             console.error("Error sending command:", err);
+        } finally {
+            setTimeout(() => setIsCommandPending(false), 1000);
         }
-    }, []);
+    }, [isCommandPending]);
 
     const removeStation = useCallback(async (stationId) => {
         try {
@@ -205,6 +233,78 @@ const Monitoring = () => {
             console.error("Error removing station:", err);
         }
     }, []);
+
+    const sendAnnouncement = async (stationId = null) => {
+        const msg = window.prompt("Enter announcement message:");
+        if (!msg) return;
+
+        if (stationId) {
+            await sendCommand(stationId, `ANNOUNCEMENT|${msg}`);
+        } else {
+            const batch = writeBatch(db);
+            stations.forEach(s => {
+                batch.update(doc(db, 'stations', s.id), { pendingCommand: `ANNOUNCEMENT|${msg}`, commandTimestamp: new Date() });
+            });
+            await batch.commit();
+        }
+        alert("Announcement sent!");
+    };
+
+    const handleFileTransfer = async (stationId = null) => {
+        if (!localServerIp) {
+            const ip = window.prompt("Enter Local Server IP (e.g., 192.168.1.5):", "localhost");
+            if (!ip) return;
+            setLocalServerIp(ip);
+        }
+
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            setIsUploading(true);
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`http://${localServerIp}:5000/api/files/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    if (stationId) {
+                        await sendCommand(stationId, `FILE_TRANSFER|${data.url}|${data.fileName}`);
+                    } else {
+                        const batch = writeBatch(db);
+                        stations.forEach(s => {
+                            batch.update(doc(db, 'stations', s.id), { pendingCommand: `FILE_TRANSFER|${data.url}|${data.fileName}`, commandTimestamp: new Date() });
+                        });
+                        await batch.commit();
+                    }
+                    alert("File distributed successfully!");
+                }
+            } catch (err) {
+                console.error("Upload failed:", err);
+                alert("Failed to upload to local server. Check IP and Firewall.");
+            } finally {
+                setIsUploading(false);
+            }
+        };
+        input.click();
+    };
+
+    const updateSecuritySettings = async () => {
+        try {
+            await updateDoc(doc(db, 'settings', 'global'), securitySettings);
+            setShowSecurityModal(false);
+            alert("Security settings updated!");
+        } catch (err) {
+            console.error("Update failed:", err);
+        }
+    };
 
     const handleAllCommand = async (command) => {
         if (!window.confirm(`Are you sure you want to ${command.toUpperCase()} all stations?`)) return;
@@ -340,6 +440,18 @@ const Monitoring = () => {
                     <button className="btn btn-primary" style={{ background: 'var(--success)' }} onClick={() => handleAllCommand('internet_allow')}>
                         <Globe size={18} /> Allow Net
                     </button>
+                    <button className="btn btn-primary" style={{ background: 'var(--primary)' }} onClick={() => sendAnnouncement()}>
+                        <Megaphone size={18} /> Broadcast
+                    </button>
+                    <button className="btn btn-primary" style={{ background: 'var(--success)' }} onClick={() => handleFileTransfer()} disabled={isUploading}>
+                        <FileUp size={18} /> {isUploading ? 'Uploading...' : 'Send File'}
+                    </button>
+                    <button className="btn btn-primary" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setShowSecurityModal(true)}>
+                        <Shield size={18} /> Security
+                    </button>
+                    <button className="btn btn-primary" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setIsGridView(!isGridView)}>
+                        {isGridView ? <Monitor size={18} /> : <Zap size={18} />} {isGridView ? 'List View' : 'Grid View'}
+                    </button>
                 </div>
             </div>
 
@@ -358,8 +470,8 @@ const Monitoring = () => {
                 ))}
             </div>
 
-            {/* Station Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(310px, 1fr))', gap: '20px' }}>
+            {/* Stations Grid */}
+            <div className={isGridView ? "stations-grid" : "stations-list"}>
                 {stations.map(station => (
                     <StationCard
                         key={station.id}
@@ -373,13 +485,50 @@ const Monitoring = () => {
                         removeStation={removeStation}
                     />
                 ))}
-
-                {stations.length === 0 && (
-                    <div className="glass-panel" style={{ gridColumn: '1 / -1', padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                        No stations connected yet. Install the client on PCs to see them here.
-                    </div>
-                )}
             </div>
+
+            {/* Security Settings Modal */}
+            {showSecurityModal && (
+                <div className="modal-overlay">
+                    <div className="glass-panel modal-content" style={{ maxWidth: '400px', width: '90%' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+                            <h3 style={{ margin: 0 }}>Security Settings</h3>
+                            <button className="btn-icon" onClick={() => setShowSecurityModal(false)}><X /></button>
+                        </div>
+
+                        <div style={{ marginBottom: '15px' }}>
+                            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                                Banned Keywords (comma separated)
+                            </label>
+                            <input
+                                type="text"
+                                className="login-input"
+                                value={securitySettings.bannedKeywords}
+                                onChange={(e) => setSecuritySettings({ ...securitySettings, bannedKeywords: e.target.value })}
+                                placeholder="e.g. YouTube, Games, Social"
+                                style={{ background: 'rgba(0,0,0,0.2)', marginBottom: '5px' }}
+                            />
+                            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                If these words appear in a window title, the PC will be locked.
+                            </p>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '25px' }}>
+                            <input
+                                type="checkbox"
+                                checked={securitySettings.blockUninstalls}
+                                onChange={(e) => setSecuritySettings({ ...securitySettings, blockUninstalls: e.target.checked })}
+                                id="blockUninstalls"
+                            />
+                            <label htmlFor="blockUninstalls" style={{ fontSize: '0.9rem' }}>Block uninstallation attempts</label>
+                        </div>
+
+                        <button className="btn btn-primary" style={{ width: '100%' }} onClick={updateSecuritySettings}>
+                            Save Settings
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

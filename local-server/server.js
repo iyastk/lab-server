@@ -5,12 +5,27 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const schedule = require('node-schedule');
 const axios = require('axios');
+const multer = require('multer');
+const fs = require('fs');
 
 const app = express();
 const PORT = 5000;
 
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
+
+// File Upload Configuration
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const dir = path.join(__dirname, 'transfers');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const upload = multer({ storage });
 
 // Database initialization
 const dbPath = path.join(__dirname, 'lab_history.db');
@@ -106,6 +121,25 @@ const reloadSchedules = () => {
 // Initial load
 reloadSchedules();
 
+// Cleanup transfers folder older than 24 hours
+schedule.scheduleJob('0 0 * * *', () => {
+    const dir = path.join(__dirname, 'transfers');
+    if (!fs.existsSync(dir)) return;
+
+    fs.readdir(dir, (err, files) => {
+        if (err) return;
+        const now = Date.now();
+        files.forEach(file => {
+            const filePath = path.join(dir, file);
+            fs.stat(filePath, (err, stats) => {
+                if (!err && (now - stats.mtimeMs) > 86400000) {
+                    fs.unlink(filePath, () => { });
+                }
+            });
+        });
+    });
+});
+
 // Endpoint to receive offloaded logs from Firebase
 app.post('/api/offload/logs', (req, res) => {
     const logs = req.body.logs;
@@ -200,6 +234,27 @@ app.delete('/api/schedules/:id', (req, res) => {
         reloadSchedules();
         res.json({ success: true });
     });
+});
+
+// File Transfer Endpoints
+app.post('/api/files/upload', upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    // Return the download URL for the client to use
+    // Since the client connects to this server, we use the server's own IP/Port
+    const downloadUrl = `http://${req.hostname}:${PORT}/api/files/download/${req.file.filename}`;
+    res.json({
+        success: true,
+        url: downloadUrl,
+        fileName: req.file.originalname,
+        savedName: req.file.filename
+    });
+});
+
+app.get('/api/files/download/:filename', (req, res) => {
+    const filePath = path.join(__dirname, 'transfers', req.params.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+    res.download(filePath);
 });
 
 const server = app.listen(PORT, '0.0.0.0', () => {

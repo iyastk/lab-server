@@ -12,9 +12,11 @@ namespace ClientLocker
         private string _lastApp = "";
         public string LastApp => _lastApp;
         public event Action<string>? OnAppChanged;
+        public event Action<string>? OnViolationDetected;
 
-        // Security flag that can be toggled by the admin
+        // Configuration
         public bool BlockUninstalls { get; set; } = true;
+        public string[] BannedKeywords { get; set; } = Array.Empty<string>();
 
         public MonitoringService()
         {
@@ -22,7 +24,25 @@ namespace ClientLocker
             _timer.Elapsed += (s, e) => CheckActiveWindow();
 
             _securityTimer = new Timer(2000); // Check every 2 seconds for security
-            _securityTimer.Elapsed += (s, e) => EnforceSecurity();
+            _securityTimer.Elapsed += (s, e) => {
+                EnforceSecurity();
+                CheckForBannedWords();
+            };
+        }
+
+        private void CheckForBannedWords()
+        {
+            if (BannedKeywords.Length == 0) return;
+            
+            // Check current app title
+            foreach (var keyword in BannedKeywords)
+            {
+                if (_lastApp.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    OnViolationDetected?.Invoke(keyword);
+                    break;
+                }
+            }
         }
 
         public void Start() 
