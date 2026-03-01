@@ -11,6 +11,7 @@ namespace LabGuardInstaller
     public partial class App : Application
     {
         private const string DotNetDownloadUrl = "https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-6.0.28-windows-x64-installer";
+        private const string NodeJsDownloadUrl = "https://nodejs.org/en/download/";
         private const string AppFolderName = "LabGuard";
 
         protected override async void OnStartup(StartupEventArgs e)
@@ -33,6 +34,22 @@ namespace LabGuardInstaller
                 return;
             }
 
+            if (!CheckNodeJs())
+            {
+                var result = MessageBox.Show(
+                    "This software requires Node.js to run the local server. \n\nWould you like to download it now?",
+                    "Requirement Missing",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    Process.Start(new ProcessStartInfo(NodeJsDownloadUrl) { UseShellExecute = true });
+                }
+                Current.Shutdown();
+                return;
+            }
+
             await InstallAndLaunchAsync();
         }
 
@@ -43,6 +60,25 @@ namespace LabGuardInstaller
                 // Simple way to check if .NET 6.0 is installed by checking registry or running a command
                 // For a bootstrapper, we can try to check the Program Files folder
                 return Directory.Exists(@"C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App\6.0");
+            }
+            catch { return false; }
+        }
+
+        private bool CheckNodeJs()
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("node", "-v")
+                {
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (Process proc = Process.Start(psi))
+                {
+                    proc.WaitForExit();
+                    return proc.ExitCode == 0;
+                }
             }
             catch { return false; }
         }
@@ -80,7 +116,11 @@ namespace LabGuardInstaller
                     MessageBox.Show("LabGuard has been installed successfully!", "Installation Complete");
                     
                     string clientExe = Path.Combine(installPath, "ClientLocker.exe");
-                    string serverBat = Path.Combine(installPath, "local-server", "start.bat");
+                    string serverDir = Path.Combine(installPath, "local-server");
+                    string serverBat = Path.Combine(serverDir, "start.bat");
+
+                    // Install server dependencies (npm install)
+                    await InstallServerDependencies(serverDir);
 
                     RegisterStartup("LabGuardClient", clientExe);
                     RegisterStartup("LabGuardServer", $"cmd.exe /c start /min \"\" \"{serverBat}\"");
@@ -97,6 +137,32 @@ namespace LabGuardInstaller
             {
                 MessageBox.Show("Installation failed: " + ex.Message);
             }
+
+        private async System.Threading.Tasks.Task InstallServerDependencies(string serverPath)
+        {
+            try
+            {
+                // Run npm install in the server directory
+                ProcessStartInfo psi = new ProcessStartInfo("npm", "install")
+                {
+                    WorkingDirectory = serverPath,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    using (Process proc = Process.Start(psi))
+                    {
+                        proc.WaitForExit();
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to install server dependencies: {ex.Message}. You may need to run 'npm install' manually in {serverPath}.", "Dependency Error");
+            }
+        }
 
         private void RegisterStartup(string name, string path)
         {
