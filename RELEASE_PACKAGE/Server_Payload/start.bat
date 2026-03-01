@@ -63,8 +63,8 @@ if not exist "server.js" (
     exit /b
 )
 
-:: Launch the Status Dashboard in the browser
-start http://localhost:5000
+:: Launch the Status Dashboard in the browser after a short delay
+start /b cmd /c "timeout /t 5 /nobreak >nul && start http://localhost:5000"
 
 node server.js
 if %errorlevel% neq 0 (

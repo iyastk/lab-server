@@ -184,7 +184,6 @@ db.serialize(() => {
         timestamp DATETIME
     )`);
 
-    // Add indexes for efficient querying
     db.run(`CREATE INDEX IF NOT EXISTS idx_history_studentId ON history(studentId)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_history_category ON history(category)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)`);
@@ -200,9 +199,9 @@ db.serialize(() => {
 
     db.run(`CREATE TABLE IF NOT EXISTS schedules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT, -- 'shutdown' or 'restart'
-        time TEXT, -- 'HH:mm'
-        days TEXT, -- '1,2,3,4,5' (0=Sun)
+        type TEXT,
+        time TEXT,
+        days TEXT,
         enabled INTEGER DEFAULT 1
     )`);
 });
@@ -213,7 +212,6 @@ const FIREBASE_BASE_URL = 'https://firestore.googleapis.com/v1/projects/lab-serv
 const runScheduledTask = async (type) => {
     console.log(`Running scheduled task: ${type}`);
     try {
-        // Get all stations from Firebase
         const resp = await axios.get(`${FIREBASE_BASE_URL}stations`);
         const stations = resp.data.documents || [];
 
@@ -256,10 +254,8 @@ const reloadSchedules = () => {
     });
 };
 
-// Initial load
 reloadSchedules();
 
-// Cleanup transfers folder older than 24 hours
 schedule.scheduleJob('0 0 * * *', () => {
     const dir = path.join(__dirname, 'transfers');
     if (!fs.existsSync(dir)) return;
@@ -278,7 +274,6 @@ schedule.scheduleJob('0 0 * * *', () => {
     });
 });
 
-// Endpoint to receive offloaded logs from Firebase
 app.post('/api/offload/logs', (req, res) => {
     const logs = req.body.logs;
     if (!Array.isArray(logs)) return res.status(400).json({ error: "Invalid logs format" });
@@ -298,7 +293,6 @@ app.post('/api/offload/logs', (req, res) => {
     res.json({ success: true, count: logs.length });
 });
 
-// Endpoint to fetch local history with filters
 app.get('/api/history', (req, res) => {
     const { category, studentId, pcName } = req.query;
     let query = "SELECT * FROM history WHERE 1=1";
@@ -321,16 +315,14 @@ app.get('/api/history', (req, res) => {
     });
 });
 
-// Basic stats endpoint
 app.get('/api/stats', (req, res) => {
     db.get("SELECT COUNT(*) as count FROM history", (err, row) => {
         res.json({ totalLogs: row ? row.count : 0 });
     });
 });
 
-// Endpoint to fetch app usage analytics
 app.get('/api/analytics/usage', (req, res) => {
-    const { date } = req.query; // Expects YYYY-MM-DD
+    const { date } = req.query;
     let query = `
         SELECT category, details as app, COUNT(*) * 5 as estimatedSeconds 
         FROM history 
@@ -349,7 +341,6 @@ app.get('/api/analytics/usage', (req, res) => {
     });
 });
 
-// Schedules CRUD
 app.get('/api/schedules', (req, res) => {
     db.all("SELECT * FROM schedules", (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -374,12 +365,8 @@ app.delete('/api/schedules/:id', (req, res) => {
     });
 });
 
-// File Transfer Endpoints
 app.post('/api/files/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-
-    // Return the download URL for the client to use
-    // Since the client connects to this server, we use the server's own IP/Port
     const downloadUrl = `http://${req.hostname}:${PORT}/api/files/download/${req.file.filename}`;
     res.json({
         success: true,
@@ -429,7 +416,6 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     registerServer();
 });
 
-// Graceful Shutdown
 const shutdown = () => {
     console.log('Shutting down server safely...');
     server.close(() => {
