@@ -31,7 +31,7 @@ const DownloadPage = () => {
 
                     <div style={{ marginTop: 'auto', display: 'flex', gap: '10px' }}>
                         <a
-                            href="/LabGuard_Client.zip"
+                            href={`/LabGuard_Client.zip?v=${Date.now()}`}
                             download
                             className="btn btn-primary"
                             style={{ flex: 1, textDecoration: 'none' }}
@@ -62,7 +62,7 @@ const DownloadPage = () => {
 
                     <div style={{ marginTop: 'auto', display: 'flex', gap: '10px' }}>
                         <a
-                            href="/LabGuard_LocalServer.zip"
+                            href={`/LabGuard_LocalServer.zip?v=${Date.now()}`}
                             download
                             className="btn"
                             style={{ flex: 1, background: 'rgba(34, 197, 94, 0.1)', color: 'var(--success)', textDecoration: 'none', border: 'none' }}
@@ -100,7 +100,7 @@ const DownloadPage = () => {
                     </div>
 
                     <div style={{ marginTop: 'auto', display: 'flex', gap: '10px' }}>
-                        <a href="/LabGuard_Ubuntu.tar.gz" download className="btn"
+                        <a href={`/LabGuard_Ubuntu.tar.gz?v=${Date.now()}`} download className="btn"
                             style={{ flex: 1, background: 'rgba(221, 72, 20, 0.1)', color: '#dd4814', textDecoration: 'none', border: 'none' }}>
                             <Download size={18} /> Download Ubuntu Client
                         </a>
@@ -116,7 +116,7 @@ const DownloadPage = () => {
                     <div>
                         <h4 style={{ color: 'var(--text-main)', marginBottom: '10px' }}>1. Start Local Server</h4>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                            Unzip the Server package on your main Admin PC. Run <code>npm install</code> then <code>start.bat</code> to begin archiving.
+                            Unzip the Server package and run <strong>start.bat</strong>. The built-in Setup Wizard will automatically install all dependencies and start the server.
                         </p>
                     </div>
                     <div>
