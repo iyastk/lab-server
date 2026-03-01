@@ -15,6 +15,15 @@ namespace ClientLocker
         private StudentData? _currentStudent = null;
         private string _pcName = Environment.MachineName;
         private bool _allowShutdown = false;
+        
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool SetCursorPos(int x, int y);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
+
+        private const int MOUSEEVENTF_LEFTDOWN = 0x02;
+        private const int MOUSEEVENTF_LEFTUP = 0x04;
 
         public MainWindow()
         {
@@ -201,6 +210,22 @@ namespace ClientLocker
                                 break;
                             case "livestream_stop":
                                 _firebase.StopLiveStream();
+                                break;
+                            case string s when s.StartsWith("mouse_click|"):
+                                try {
+                                    var coords = command.Split('|');
+                                    int x = int.Parse(coords[1]);
+                                    int y = int.Parse(coords[2]);
+                                    
+                                    // Coordinates from dashboard are 0-1000 representing screen %
+                                    int screenX = (int)(x * System.Windows.SystemParameters.PrimaryScreenWidth / 1000.0);
+                                    int screenY = (int)(y * System.Windows.SystemParameters.PrimaryScreenHeight / 1000.0);
+                                    
+                                    Application.Current.Dispatcher.Invoke(() => {
+                                        SetCursorPos(screenX, screenY);
+                                        mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP, screenX, screenY, 0, 0);
+                                    });
+                                } catch { }
                                 break;
                             default:
                                 if (command.StartsWith("notify|", StringComparison.OrdinalIgnoreCase))

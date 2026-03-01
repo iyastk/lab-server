@@ -142,8 +142,29 @@ namespace LabGuardInstaller
         {
             try
             {
+                // Verify if npm is available first
+                ProcessStartInfo checkNpm = new ProcessStartInfo("cmd.exe", "/c npm -v")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true
+                };
+
+                bool npmFound = false;
+                try {
+                    using (Process p = Process.Start(checkNpm)) {
+                        p.WaitForExit();
+                        npmFound = p.ExitCode == 0;
+                    }
+                } catch { }
+
+                if (!npmFound) {
+                    MessageBox.Show("Node.js/npm was not found in the path. Please install Node.js and run 'npm install' manually in " + serverPath, "npm Not Found");
+                    return;
+                }
+
                 // Run npm install in the server directory
-                ProcessStartInfo psi = new ProcessStartInfo("npm", "install")
+                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c npm install")
                 {
                     WorkingDirectory = serverPath,
                     UseShellExecute = false,
@@ -154,13 +175,22 @@ namespace LabGuardInstaller
                 {
                     using (Process proc = Process.Start(psi))
                     {
-                        proc.WaitForExit();
+                        // Give it up to 2 minutes for dependencies
+                        if (!proc.WaitForExit(120000)) {
+                            proc.Kill();
+                        }
                     }
                 });
+
+                // Verify express exists
+                if (!Directory.Exists(Path.Combine(serverPath, "node_modules", "express")))
+                {
+                    MessageBox.Show("Dependencies (Express) failed to install automatically. Please run 'npm install' manually in " + serverPath, "Dependency Error");
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to install server dependencies: {ex.Message}. You may need to run 'npm install' manually in {serverPath}.", "Dependency Error");
+                MessageBox.Show($"Failed to install server dependencies: {ex.Message}.", "Dependency Error");
             }
         }
 

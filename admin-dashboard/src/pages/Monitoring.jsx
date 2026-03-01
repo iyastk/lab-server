@@ -52,9 +52,9 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
         )}
 
         {/* Active App */}
-        {station.currentApp && (
+        {station.currentApp && !station.currentApp.includes("Idle:") && (
             <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Active: </span>{station.currentApp}
+                <span style={{ color: 'var(--text-muted)' }}>Active: </span>{station.currentApp.split('|').pop()}
             </div>
         )}
 
@@ -114,19 +114,26 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
                     <img
                         src={`data:image/jpeg;base64,${station.lastScreenshot}`}
                         alt="Screen"
-                        style={{ width: '100%', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', cursor: 'zoom-in', display: 'block' }}
-                        onClick={() => setLightbox({ pcName: station.pcName || station.id, src: station.lastScreenshot })}
-                    />
-                    <button
-                        onClick={() => setLightbox({ pcName: station.pcName || station.id, src: station.lastScreenshot })}
-                        style={{
-                            position: 'absolute', bottom: '8px', right: '8px',
-                            background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '6px',
-                            color: 'white', padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem'
+                        className="remote-screen"
+                        style={{ width: '100%', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', cursor: 'crosshair', display: 'block' }}
+                        onClick={(e) => {
+                            const rect = e.target.getBoundingClientRect();
+                            const x = Math.round(((e.clientX - rect.left) / rect.width) * 1000);
+                            const y = Math.round(((e.clientY - rect.top) / rect.height) * 1000);
+                            sendCommand(station.id, `MOUSE_CLICK|${x}|${y}`);
                         }}
-                    >
-                        <Maximize2 size={12} /> Fullscreen
-                    </button>
+                    />
+                    <div style={{ position: 'absolute', top: '8px', right: '8px', display: 'flex', gap: '5px' }}>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setLightbox({ pcName: station.pcName || station.id, src: station.lastScreenshot, id: station.id }); }}
+                            style={{
+                                background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '6px',
+                                color: 'white', padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem'
+                            }}
+                        >
+                            <Maximize2 size={12} /> Full
+                        </button>
+                    </div>
                 </div>
             </div>
         )}
@@ -289,8 +296,13 @@ const Monitoring = () => {
                     <img
                         src={`data:image/jpeg;base64,${lightbox.src}`}
                         alt="Full Screen"
-                        style={{ maxWidth: '95vw', maxHeight: '90vh', borderRadius: '8px', objectFit: 'contain' }}
-                        onClick={e => e.stopPropagation()}
+                        style={{ maxWidth: '95vw', maxHeight: '90vh', borderRadius: '8px', objectFit: 'contain', cursor: 'crosshair' }}
+                        onClick={(e) => {
+                            const rect = e.target.getBoundingClientRect();
+                            const x = Math.round(((e.clientX - rect.left) / rect.width) * 1000);
+                            const y = Math.round(((e.clientY - rect.top) / rect.height) * 1000);
+                            sendCommand(lightbox.id, `MOUSE_CLICK|${x}|${y}`);
+                        }}
                     />
                 </div>
             )}
