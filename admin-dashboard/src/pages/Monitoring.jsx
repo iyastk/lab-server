@@ -3,7 +3,10 @@ import { db } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc, getDoc } from 'firebase/firestore';
 import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock, Megaphone, Send, FileUp, Shield, Settings } from 'lucide-react';
 
-const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand, toggleLiveView, setLightbox, removeStation }) => (
+const StationCard = memo(({
+    station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand,
+    toggleLiveView, setLightbox, removeStation, sendAnnouncement, handleFileTransfer, isCommandPending
+}) => (
     <div className="glass-panel" style={{
         padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px',
         ...(isLive ? { borderColor: 'rgba(239,68,68,0.5)', boxShadow: '0 0 0 2px rgba(239,68,68,0.2)' } : {})
@@ -60,7 +63,7 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
         )}
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', opacity: isCommandPending ? 0.6 : 1, pointerEvents: isCommandPending ? 'none' : 'auto', transition: 'opacity 0.2s' }}>
             <button className="btn" style={{ flex: 1, background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', minWidth: '80px' }}
                 onClick={() => sendCommand(station.id, station.isLocked ? 'unlock' : 'lock')}>
                 {station.isLocked ? <><Unlock size={14} /> Unlock</> : <><Lock size={14} /> Freeze</>}
@@ -234,7 +237,7 @@ const Monitoring = () => {
         }
     }, []);
 
-    const sendAnnouncement = async (stationId = null) => {
+    const sendAnnouncement = useCallback(async (stationId = null) => {
         const msg = window.prompt("Enter announcement message:");
         if (!msg) return;
 
@@ -248,9 +251,9 @@ const Monitoring = () => {
             await batch.commit();
         }
         alert("Announcement sent!");
-    };
+    }, [sendCommand, stations]);
 
-    const handleFileTransfer = async (stationId = null) => {
+    const handleFileTransfer = useCallback(async (stationId = null) => {
         if (!localServerIp) {
             const ip = window.prompt("Enter Local Server IP (e.g., 192.168.1.5):", "localhost");
             if (!ip) return;
@@ -294,7 +297,7 @@ const Monitoring = () => {
             }
         };
         input.click();
-    };
+    }, [localServerIp, sendCommand, stations]);
 
     const updateSecuritySettings = async () => {
         try {
@@ -483,6 +486,9 @@ const Monitoring = () => {
                         toggleLiveView={toggleLiveView}
                         setLightbox={setLightbox}
                         removeStation={removeStation}
+                        sendAnnouncement={sendAnnouncement}
+                        handleFileTransfer={handleFileTransfer}
+                        isCommandPending={isCommandPending}
                     />
                 ))}
             </div>
