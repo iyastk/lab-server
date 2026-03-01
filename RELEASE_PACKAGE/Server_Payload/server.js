@@ -31,6 +31,11 @@ db.serialize(() => {
         timestamp DATETIME
     )`);
 
+    // Add indexes for efficient querying
+    db.run(`CREATE INDEX IF NOT EXISTS idx_history_studentId ON history(studentId)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_history_category ON history(category)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_history_timestamp ON history(timestamp)`);
+
     db.run(`CREATE TABLE IF NOT EXISTS daily_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         studentId TEXT,
@@ -197,7 +202,24 @@ app.delete('/api/schedules/:id', (req, res) => {
     });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Local Admin Server running on http://localhost:${PORT}`);
     console.log(`To allow client access, ensure firewall allows port ${PORT}`);
 });
+
+// Graceful Shutdown
+const shutdown = () => {
+    console.log('Shutting down server safely...');
+    server.close(() => {
+        console.log('HTTP server closed.');
+        activeJobs.forEach(job => job.cancel());
+        db.close((err) => {
+            if (err) console.error('Error closing database', err);
+            else console.log('Database connection closed safely.');
+            process.exit(0);
+        });
+    });
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
