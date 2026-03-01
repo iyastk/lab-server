@@ -5,7 +5,7 @@ import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, Rot
 
 const StationCard = memo(({
     station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand,
-    toggleLiveView, setLightbox, removeStation, sendAnnouncement, handleFileTransfer, isCommandPending
+    toggleLiveView, setLightbox, removeStation, sendAnnouncement, handleFileTransfer, isCommandPending, wakeStation
 }) => (
     <div className="glass-panel" style={{
         padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px',
@@ -112,6 +112,14 @@ const StationCard = memo(({
                 onClick={() => handleFileTransfer(station.id)}>
                 <FileUp size={16} />
             </button>
+
+            {/* Wake PC */}
+            {station.status === 'offline' && station.macAddress && (
+                <button className="btn" title="Wake Computer" style={{ background: 'rgba(34,197,94,0.1)', color: 'var(--success)' }}
+                    onClick={() => wakeStation(station.macAddress)}>
+                    <Zap size={16} /> Wake
+                </button>
+            )}
 
             {/* Remove Station */}
             <button className="btn" title="Remove Station" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
@@ -298,6 +306,31 @@ const Monitoring = () => {
         };
         input.click();
     }, [localServerIp, sendCommand, stations]);
+
+    const wakeStation = useCallback(async (macAddress) => {
+        if (!localServerIp) {
+            const ip = window.prompt("Enter Local Server IP to send Wake packet:", "localhost");
+            if (!ip) return;
+            setLocalServerIp(ip);
+        }
+
+        try {
+            const response = await fetch(`http://${localServerIp}:5000/api/wake`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ macAddress })
+            });
+            const data = await response.json();
+            if (data.success) {
+                alert("Wake signal sent successfully!");
+            } else {
+                alert("Failed to wake: " + data.error);
+            }
+        } catch (err) {
+            console.error("Wake failed:", err);
+            alert("Local Server unreachable. Check IP and firewall.");
+        }
+    }, [localServerIp]);
 
     const updateSecuritySettings = async () => {
         try {
@@ -489,6 +522,7 @@ const Monitoring = () => {
                         sendAnnouncement={sendAnnouncement}
                         handleFileTransfer={handleFileTransfer}
                         isCommandPending={isCommandPending}
+                        wakeStation={wakeStation}
                     />
                 ))}
             </div>

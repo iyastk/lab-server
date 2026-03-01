@@ -102,6 +102,7 @@ namespace ClientLocker
                         pcName = new { stringValue = pcName },
                         currentUser = new { stringValue = studentId },
                         currentApp = new { stringValue = currentApp },
+                        macAddress = new { stringValue = GetMacAddress() },
                         lastSeen = new { timestampValue = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ") }
                     }
                 };
@@ -109,7 +110,7 @@ namespace ClientLocker
                 var json = JsonConvert.SerializeObject(body);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=status&updateMask.fieldPaths=currentUser&updateMask.fieldPaths=currentApp&updateMask.fieldPaths=lastSeen", content);
+                await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=status&updateMask.fieldPaths=currentUser&updateMask.fieldPaths=currentApp&updateMask.fieldPaths=macAddress&updateMask.fieldPaths=lastSeen", content);
             }
             catch { }
         }
@@ -471,6 +472,23 @@ namespace ClientLocker
                 }
             }
             catch { return null; }
+        }
+
+        private string GetMacAddress()
+        {
+            try
+            {
+                var nics = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces();
+                var activeNic = nics.FirstOrDefault(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up && 
+                                                        n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback);
+                
+                if (activeNic != null)
+                {
+                    return string.Join(":", activeNic.GetPhysicalAddress().GetAddressBytes().Select(b => b.ToString("X2")));
+                }
+                return "00:00:00:00:00:00";
+            }
+            catch { return "00:00:00:00:00:00"; }
         }
     }
 }

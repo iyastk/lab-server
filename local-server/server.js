@@ -8,6 +8,7 @@ const multer = require('multer');
 const schedule = require('node-schedule');
 const fs = require('fs');
 const os = require('os');
+const dgram = require('dgram');
 
 const app = express();
 const PORT = 5000;
@@ -319,6 +320,42 @@ app.get('/api/stats', (req, res) => {
     db.get("SELECT COUNT(*) as count FROM history", (err, row) => {
         res.json({ totalLogs: row ? row.count : 0 });
     });
+});
+
+app.post('/api/wake', (req, res) => {
+    const { macAddress } = req.body;
+    if (!macAddress) return res.status(400).json({ error: "MAC Address is required" });
+
+    try {
+        const cleanMac = macAddress.replace(/:/g, '').replace(/-/g, '');
+        if (cleanMac.length !== 12) throw new Error("Invalid MAC Address format. Use 00:11:22:33:44:55");
+
+        const macBuf = Buffer.from(cleanMac, 'hex');
+        const packet = Buffer.alloc(102).fill(0xff, 0, 6);
+        for (let i = 0; i < 16; i++) {
+            macBuf.copy(packet, 6 + i * 6);
+        }
+
+        const client = dgram.createSocket('udp4');
+        client.on('error', (err) => {
+            console.error("WoL socket error:", err);
+            client.close();
+        });
+
+        client.bind(() => {
+            client.setBroadcast(true);
+            client.send(packet, 0, packet.length, 9, '255.255.255.255', (err) => {
+                if (err) console.error("WoL send error:", err);
+                client.close();
+            });
+        });
+
+        console.log(`WoL Magic Packet sent to ${macAddress}`);
+        res.json({ success: true, message: `Magic Packet sent to ${macAddress}` });
+    } catch (err) {
+        console.error("WoL Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.get('/api/analytics/usage', (req, res) => {
