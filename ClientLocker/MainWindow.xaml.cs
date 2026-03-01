@@ -317,11 +317,12 @@ namespace ClientLocker
             string id = IdInput.Text;
             string password = PasswordInput.Password;
 
-            if ((id == "admin" && password == "admin123") || (id == "Admin" && password == "nopassword"))
+            // Simplified Admin Login as requested
+            if (id == "admin" && password == "nopassword")
             {
                 _hook.Unhook();
                 this.Hide();
-                if (id == "Admin") OpenUserDashboard(new StudentData { Id = "System Admin", WeeklyRemaining = 9999, DailyRemaining = 9999 });
+                OpenUserDashboard(new StudentData { Id = "System Admin", WeeklyRemaining = 9999, DailyRemaining = 9999 });
                 MessageBox.Show("Welcome, Admin!");
             }
             else
@@ -340,6 +341,14 @@ namespace ClientLocker
                 }
                 else MessageBox.Show("Invalid ID or Password");
             }
+        }
+
+        private void AdminLogin_Click(object sender, RoutedEventArgs e)
+        {
+            IdInput.Text = "admin";
+            PasswordInput.Password = "";
+            PasswordInput.Focus();
+            SetStatus("Admin ID pre-filled. Please enter admin password.");
         }
 
         private void OpenUserDashboard(StudentData student)
