@@ -8,18 +8,55 @@ namespace ClientLocker
     public class MonitoringService
     {
         private Timer _timer;
+        private Timer _securityTimer;
         private string _lastApp = "";
         public string LastApp => _lastApp;
         public event Action<string>? OnAppChanged;
+
+        // Security flag that can be toggled by the admin
+        public bool BlockUninstalls { get; set; } = true;
 
         public MonitoringService()
         {
             _timer = new Timer(5000); // Check every 5 seconds
             _timer.Elapsed += (s, e) => CheckActiveWindow();
+
+            _securityTimer = new Timer(2000); // Check every 2 seconds for security
+            _securityTimer.Elapsed += (s, e) => EnforceSecurity();
         }
 
-        public void Start() => _timer.Start();
-        public void Stop() => _timer.Stop();
+        public void Start() 
+        {
+            _timer.Start();
+            _securityTimer.Start();
+        }
+        
+        public void Stop() 
+        {
+            _timer.Stop();
+            _securityTimer.Stop();
+        }
+
+        private void EnforceSecurity()
+        {
+            if (!BlockUninstalls) return;
+
+            // List of sensitive processes to block for regular students
+            string[] blockedProcesses = { "msiexec", "unins000", "uninstall" };
+            
+            try
+            {
+                foreach (var procName in blockedProcesses)
+                {
+                    var procs = Process.GetProcessesByName(procName);
+                    foreach (var p in procs)
+                    {
+                        try { p.Kill(); } catch { }
+                    }
+                }
+            }
+            catch { /* Ignore enumeration errors */ }
+        }
 
         private void CheckActiveWindow()
         {

@@ -235,8 +235,8 @@ namespace ClientLocker
                     }
 
                     _currentStudent = student;
-                    UnlockPC();
                     OpenUserDashboard(student);
+                    UnlockPC();
                     MessageBox.Show($"Welcome, {id}!");
                 }
                 else
@@ -295,8 +295,10 @@ namespace ClientLocker
             }
         }
 
-        private void UnlockPC()
+        private async void UnlockPC()
         {
+            _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
+
             _sessionTimer.Start();
             _monitor.Start();
             this.Hide();

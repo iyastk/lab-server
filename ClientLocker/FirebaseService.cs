@@ -209,6 +209,26 @@ namespace ClientLocker
             await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=pendingCommand", content);
         }
 
+        public async Task<bool> GetGlobalSecuritySettings()
+        {
+            try
+            {
+                var response = await _http.GetAsync(BaseUrl + "settings/security");
+                if (!response.IsSuccessStatusCode) return true; // Default to blocked
+                
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                var fields = data["fields"];
+                
+                if (fields?["blockUninstalls"]?["booleanValue"] != null)
+                {
+                    return fields["blockUninstalls"]["booleanValue"].ToObject<bool>();
+                }
+                return true;
+            }
+            catch { return true; }
+        }
+
         public async Task<bool> UpdateStudentProfile(string oldId, string oldPass, string newId, string newPass)
         {
             try

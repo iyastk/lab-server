@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Clock, Calendar, Power, RotateCcw, Trash2, Plus, Bell } from 'lucide-react';
+import { Clock, Calendar, Power, RotateCcw, Trash2, Plus, Bell, Shield } from 'lucide-react';
+import { db } from '../firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const DAYS_OF_WEEK = [
     { value: 0, label: 'Sun' },
@@ -18,12 +20,37 @@ const Scheduling = () => {
     const [newDays, setNewDays] = useState('1,2,3,4,5'); // Mon-Fri
     const [loading, setLoading] = useState(false);
     const [serverUnreachable, setServerUnreachable] = useState(false);
+    const [blockUninstalls, setBlockUninstalls] = useState(true);
 
     const LOCAL_SERVER_URL = 'http://localhost:5000';
 
     useEffect(() => {
         fetchSchedules();
+        fetchSecuritySettings();
     }, []);
+
+    const fetchSecuritySettings = async () => {
+        try {
+            const docRef = doc(db, 'settings', 'security');
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                setBlockUninstalls(docSnap.data().blockUninstalls !== false); // default true
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    };
+
+    const toggleSecuritySetting = async () => {
+        const newValue = !blockUninstalls;
+        try {
+            await setDoc(doc(db, 'settings', 'security'), { blockUninstalls: newValue }, { merge: true });
+            setBlockUninstalls(newValue);
+            alert(`Uninstall Protection is now ${newValue ? 'ON' : 'OFF'}`);
+        } catch (e) {
+            alert("Failed to update security settings");
+        }
+    };
 
     const fetchSchedules = async () => {
         try {
@@ -105,6 +132,24 @@ const Scheduling = () => {
                         Local Server Offline
                     </div>
                 )}
+            </div>
+
+            <div className="glass-panel" style={{ padding: '30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                    <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <Shield size={20} color={blockUninstalls ? "var(--success)" : "var(--danger)"} />
+                        Uninstall Protection
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        When ON, actively prevents students from running uninstallers (msiexec, unins000) while logged in to their sessions.
+                    </p>
+                </div>
+                <button
+                    onClick={toggleSecuritySetting}
+                    className={`btn ${blockUninstalls ? 'btn-danger' : 'btn-success'}`}
+                    style={{ padding: '10px 20px' }}>
+                    {blockUninstalls ? 'Disable Protection' : 'Enable Protection'}
+                </button>
             </div>
 
             <div className="glass-panel" style={{ padding: '30px' }}>
