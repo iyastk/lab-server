@@ -77,6 +77,13 @@ namespace ClientLocker
             }
         }
 
+        private void ShareFile_Click(object sender, RoutedEventArgs e)
+        {
+            var peerWin = new PeerTransferWindow(_firebaseService, Environment.MachineName);
+            peerWin.Owner = this;
+            peerWin.ShowDialog();
+        }
+
         private void Logout_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Are you sure you want to end your session and lock this computer?", "Logout", MessageBoxButton.YesNo, MessageBoxImage.Question);

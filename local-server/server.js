@@ -1,12 +1,5 @@
-const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const path = require('path');
-const schedule = require('node-schedule');
-const axios = require('axios');
-const multer = require('multer');
 const fs = require('fs');
+const os = require('os');
 
 const app = express();
 const PORT = 5000;
@@ -257,9 +250,38 @@ app.get('/api/files/download/:filename', (req, res) => {
     res.download(filePath);
 });
 
+const registerServer = async () => {
+    try {
+        const nets = os.networkInterfaces();
+        let localIp = '127.0.0.1';
+        for (const name of Object.keys(nets)) {
+            for (const net of nets[name]) {
+                if (net.family === 'IPv4' && !net.internal) {
+                    localIp = net.address;
+                    break;
+                }
+            }
+            if (localIp !== '127.0.0.1') break;
+        }
+
+        const body = {
+            fields: {
+                serverAddress: { stringValue: `http://${localIp}:${PORT}` },
+                lastUpdated: { timestampValue: new Date().toISOString() }
+            }
+        };
+
+        await axios.patch(`${FIREBASE_BASE_URL}settings/network?updateMask.fieldPaths=serverAddress&updateMask.fieldPaths=lastUpdated`, body);
+        console.log(`Server registered in Firebase with IP: ${localIp}`);
+    } catch (err) {
+        console.error("Server registration error:", err.message);
+    }
+};
+
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Local Admin Server running on http://localhost:${PORT}`);
     console.log(`To allow client access, ensure firewall allows port ${PORT}`);
+    registerServer();
 });
 
 // Graceful Shutdown

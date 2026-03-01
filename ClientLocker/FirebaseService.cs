@@ -6,6 +6,8 @@ using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.IO;
+using System.Net.Http.Headers;
 
 namespace ClientLocker
 {
@@ -412,6 +414,63 @@ namespace ClientLocker
                 }
             }
             catch { return ""; }
+        }
+
+        public async Task<string?> GetNetworkSettings()
+        {
+            try
+            {
+                var response = await _http.GetAsync(BaseUrl + "settings/network");
+                if (!response.IsSuccessStatusCode) return null;
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                return data["fields"]?["serverAddress"]?["stringValue"]?.ToString();
+            }
+            catch { return null; }
+        }
+
+        public async Task<List<string>> GetAllStations()
+        {
+            try
+            {
+                var response = await _http.GetAsync(BaseUrl + "stations");
+                if (!response.IsSuccessStatusCode) return new List<string>();
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                var documents = data["documents"];
+                var stations = new List<string>();
+                if (documents != null)
+                {
+                    foreach (var doc in documents)
+                    {
+                        string name = doc["name"].ToString().Split('/').Last();
+                        stations.Add(name);
+                    }
+                }
+                return stations;
+            }
+            catch { return new List<string>(); }
+        }
+
+        public async Task<string?> UploadFileToLocalServer(string filePath, string serverUrl)
+        {
+            try
+            {
+                using (var content = new MultipartFormDataContent())
+                {
+                    var fileContent = new ByteArrayContent(System.IO.File.ReadAllBytes(filePath));
+                    fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("application/octet-stream");
+                    content.Add(fileContent, "file", System.IO.Path.GetFileName(filePath));
+
+                    var response = await _http.PostAsync(serverUrl + "/api/files/upload", content);
+                    if (!response.IsSuccessStatusCode) return null;
+
+                    var result = await response.Content.ReadAsStringAsync();
+                    var data = JObject.Parse(result);
+                    return data["url"]?.ToString();
+                }
+            }
+            catch { return null; }
         }
     }
 }

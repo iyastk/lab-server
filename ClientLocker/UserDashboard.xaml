@@ -61,6 +61,13 @@
                     </Button.Resources>
                 </Button>
 
+                <Button x:Name="ShareFileBtn" Content="Share File with Peer" Click="ShareFile_Click" 
+                        Background="#0ea5e9" Foreground="White" Padding="10" Margin="0,0,0,5" BorderThickness="0">
+                    <Button.Resources>
+                        <Style TargetType="Border"><Setter Property="CornerRadius" Value="5"/></Style>
+                    </Button.Resources>
+                </Button>
+
                 <Button x:Name="RequestTimeBtn" Content="Request Extra Time" Click="RequestTime_Click" 
                         Background="#4f46e5" Foreground="White" Padding="10" Margin="0,0,0,5" BorderThickness="0">
                     <Button.Resources>
