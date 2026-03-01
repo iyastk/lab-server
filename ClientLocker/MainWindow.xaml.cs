@@ -345,10 +345,10 @@ namespace ClientLocker
 
         private void AdminLogin_Click(object sender, RoutedEventArgs e)
         {
-            IdInput.Text = "admin";
+            IdInput.Text = "";
             PasswordInput.Password = "";
-            PasswordInput.Focus();
-            SetStatus("Admin ID pre-filled. Please enter admin password.");
+            IdInput.Focus();
+            SetStatus("Admin login mode: Please type 'admin' and your password.");
         }
 
         private void OpenUserDashboard(StudentData student)
