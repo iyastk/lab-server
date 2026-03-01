@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Windows;
+using Microsoft.Win32;
+using IWshRuntimeLibrary;
 
 namespace LabGuardInstaller
 {
@@ -75,8 +77,16 @@ namespace LabGuardInstaller
                         }
                     });
                     
-                    MessageBox.Show("LabGuard has been installed successfully! It will now launch.", "Installation Complete");
-                    Process.Start(Path.Combine(installPath, "ClientLocker.exe"));
+                    MessageBox.Show("LabGuard has been installed successfully!", "Installation Complete");
+                    
+                    string clientExe = Path.Combine(installPath, "ClientLocker.exe");
+                    string serverBat = Path.Combine(installPath, "local-server", "start.bat");
+
+                    RegisterStartup("LabGuardClient", clientExe);
+                    RegisterStartup("LabGuardServer", $"cmd.exe /c start /min \"\" \"{serverBat}\"");
+                    CreateDesktopShortcut(clientExe);
+
+                    Process.Start(new ProcessStartInfo(clientExe) { UseShellExecute = true });
                 }
                 else
                 {
@@ -88,7 +98,40 @@ namespace LabGuardInstaller
                 MessageBox.Show("Installation failed: " + ex.Message);
             }
 
-            Current.Shutdown();
+        private void RegisterStartup(string name, string path)
+        {
+            try
+            {
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+                {
+                    key?.SetValue(name, $"\"{path}\"");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to register {name} for startup: {ex.Message}", "Registry Error");
+            }
         }
+
+        private void CreateDesktopShortcut(string targetPath)
+        {
+            try
+            {
+                string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+                if (string.IsNullOrEmpty(desktopPath)) desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+                string shortcutPath = Path.Combine(desktopPath, "LabGuard.lnk");
+                WshShell shell = new WshShell();
+                IWshShortcut shortcut = (IWshShortcut)shell.CreateShortcut(shortcutPath);
+                shortcut.TargetPath = targetPath;
+                shortcut.WorkingDirectory = Path.GetDirectoryName(targetPath);
+                shortcut.Description = "Launch LabGuard Client";
+                shortcut.Save();
+            }
+            catch { /* Non-critical if shortcut fails */ }
+        }
+
+        Current.Shutdown();
     }
+}
 }

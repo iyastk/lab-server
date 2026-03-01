@@ -78,11 +78,28 @@ namespace ClientLocker
         {
             try
             {
-                var path = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                key?.SetValue("LabGuard", $"\"{path}\"");
+                // Use ProcessPath (available in .NET 6+)
+                var path = Environment.ProcessPath;
+                if (string.IsNullOrEmpty(path)) path = System.Reflection.Assembly.GetExecutingAssembly().Location;
+
+                // Try HKLM first (requires admin)
+                try
+                {
+                    using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+                    {
+                        key?.SetValue("LabGuard", $"\"{path}\"");
+                        return; // Successfully set HKLM
+                    }
+                }
+                catch { /* Ignore and fallback to HKCU */ }
+
+                // Fallback to CurrentUser
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+                {
+                    key?.SetValue("LabGuard", $"\"{path}\"");
+                }
             }
-            catch { /* Might fail without admin or UAC */ }
+            catch { /* Final fallback, nothing we can do */ }
         }
 
         // Block student-initiated shutdown/restart
