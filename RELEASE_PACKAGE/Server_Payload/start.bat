@@ -1,5 +1,8 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
+:: Ensure the script runs from its own directory
+cd /d "%~dp0"
+
 title LabGuard Local Server Setup Wizard
 
 echo ============================================================
@@ -53,9 +56,20 @@ echo.
 echo [3/3] Starting LabGuard Local Admin Server...
 echo ============================================================
 echo.
+if not exist "server.js" (
+    echo [ERROR] server.js not found in !CD!
+    echo Please ensure you unzipped all files including server.js.
+    pause
+    exit /b
+)
+
+:: Launch the Status Dashboard in the browser
+start http://localhost:5000
+
 node server.js
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Server crashed or failed to start.
+    pause
 )
 pause

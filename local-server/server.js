@@ -1,11 +1,156 @@
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
+const axios = require('axios');
+const multer = require('multer');
+const schedule = require('node-schedule');
 const fs = require('fs');
 const os = require('os');
 
 const app = express();
 const PORT = 5000;
+const SERVER_START_TIME = Date.now();
 
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
+
+// root route for Status Dashboard
+app.get('/', (req, res) => {
+    const uptime = Math.floor((Date.now() - SERVER_START_TIME) / 1000);
+    const hours = Math.floor(uptime / 3600);
+    const minutes = Math.floor((uptime % 3600) / 60);
+    const seconds = uptime % 60;
+
+    const html = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>LabGuard | Local Server Status</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+        <style>
+            :root {
+                --primary: #4f46e5;
+                --success: #22c55e;
+                --bg: #0f172a;
+                --glass: rgba(30, 41, 59, 0.7);
+            }
+            body {
+                font-family: 'Inter', sans-serif;
+                background-color: var(--bg);
+                color: #f8fafc;
+                margin: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                overflow: hidden;
+            }
+            .background {
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: radial-gradient(circle at 20% 30%, rgba(79, 70, 229, 0.15) 0%, transparent 50%),
+                            radial-gradient(circle at 80% 70%, rgba(34, 197, 94, 0.1) 0%, transparent 50%);
+                z-index: -1;
+            }
+            .dashboard {
+                background: var(--glass);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 24px;
+                padding: 40px;
+                width: 90%;
+                max-width: 500px;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                text-align: center;
+                animation: fadeIn 0.8s ease-out;
+            }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+            h1 { font-size: 2rem; margin-bottom: 8px; font-weight: 600; letter-spacing: -0.025em; }
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                background: rgba(34, 197, 94, 0.1);
+                color: var(--success);
+                padding: 4px 12px;
+                border-radius: 99px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                margin-bottom: 30px;
+            }
+            .badge::before {
+                content: '';
+                display: inline-block;
+                width: 8px; height: 8px;
+                background: var(--success);
+                border-radius: 50%;
+                margin-right: 8px;
+                box-shadow: 0 0 10px var(--success);
+            }
+            .stats-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-bottom: 30px;
+            }
+            .stat-card {
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 16px;
+                padding: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+            }
+            .stat-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+            .stat-value { font-size: 1.1rem; font-weight: 600; color: #f1f5f9; }
+            .footer { font-size: 0.85rem; color: #64748b; margin-top: 20px; }
+            .btn {
+                background: var(--primary);
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 12px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.2s;
+            }
+            .btn:hover { background: #4338ca; transform: translateY(-2px); }
+        </style>
+    </head>
+    <body>
+        <div class="background"></div>
+        <div class="dashboard">
+            <h1>LabGuard Admin Server</h1>
+            <div class="badge">SYSTEM ONLINE</div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Uptime</div>
+                    <div class="stat-value">${hours}h ${minutes}m ${seconds}s</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Local Port</div>
+                    <div class="stat-value">${PORT}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Database</div>
+                    <div class="stat-value">SQLite Connected</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">History Logs</div>
+                    <div class="stat-value">Vault Syncing...</div>
+                </div>
+            </div>
+
+            <button class="btn" onclick="location.reload()">Refresh Status</button>
+            <p class="footer">This server is a background runner for LabGuard Cloud. Manage sessions via the Online Dashboard.</p>
+        </div>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
 
 // File Upload Configuration
 const storage = multer.diskStorage({
