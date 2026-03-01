@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc, getDoc } from 'firebase/firestore';
-import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2 } from 'lucide-react';
+import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock } from 'lucide-react';
 
 const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand, toggleLiveView, setLightbox, removeStation }) => (
     <div className="glass-panel" style={{
@@ -27,6 +27,7 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {isLive && <span style={{ fontSize: '0.7rem', color: 'var(--danger)', fontWeight: 'bold', animation: 'livePulse 2s infinite' }}>● LIVE</span>}
+                {station.isInternetBlocked === 'true' && <GlobeLock size={16} color="var(--danger)" title="Internet Blocked" />}
                 <span className={`status-indicator ${station.status === 'online' ? 'status-online' : 'status-offline'}`}></span>
             </div>
         </div>
@@ -88,6 +89,13 @@ const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeReque
             <button className="btn" title="Shutdown PC" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}
                 onClick={() => { if (window.confirm(`Shutdown ${station.pcName || station.id}?`)) sendCommand(station.id, 'shutdown'); }}>
                 <Power size={16} />
+            </button>
+
+            {/* Internet Control */}
+            <button className="btn" title={station.isInternetBlocked === 'true' ? 'Allow Internet' : 'Block Internet'}
+                style={{ background: station.isInternetBlocked === 'true' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: station.isInternetBlocked === 'true' ? 'var(--success)' : 'var(--danger)' }}
+                onClick={() => sendCommand(station.id, station.isInternetBlocked === 'true' ? 'INTERNET_ALLOW' : 'INTERNET_BLOCK')}>
+                {station.isInternetBlocked === 'true' ? <Globe size={16} /> : <GlobeLock size={16} />}
             </button>
 
             {/* Remove Station */}
@@ -325,6 +333,12 @@ const Monitoring = () => {
                     </button>
                     <button className="btn btn-primary" onClick={() => handleAllCommand('lock')}>
                         <Lock size={18} /> Freeze All
+                    </button>
+                    <button className="btn btn-primary" style={{ background: 'var(--danger)' }} onClick={() => handleAllCommand('internet_block')}>
+                        <GlobeLock size={18} /> Block Net
+                    </button>
+                    <button className="btn btn-primary" style={{ background: 'var(--success)' }} onClick={() => handleAllCommand('internet_allow')}>
+                        <Globe size={18} /> Allow Net
                     </button>
                 </div>
             </div>

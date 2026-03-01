@@ -211,6 +211,12 @@ namespace ClientLocker
                             case "livestream_stop":
                                 _firebase.StopLiveStream();
                                 break;
+                            case "internet_block":
+                                SetInternetAccess(false);
+                                break;
+                            case "internet_allow":
+                                SetInternetAccess(true);
+                                break;
                             case string s when s.StartsWith("mouse_click|"):
                                 try {
                                     var coords = command.Split('|');
@@ -346,6 +352,53 @@ namespace ClientLocker
             {
                 MessageBox.Show("Failed to update profile. Please verify your current ID and Password.");
             }
+        }
+
+        private void SetInternetAccess(bool allow)
+        {
+            try
+            {
+                // We use netsh to manage firewall rules. 
+                // Rule 1: Always allow LabGuard (our app) to ensure we don't lock ourselves out of Firebase
+                string appPath = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+                
+                // Ensure Allow rule for LabGuard exists
+                RunHiddenCommand("netsh", $"advfirewall firewall add rule name=\"LabGuard_Allow\" dir=out action=allow program=\"{appPath}\" enable=yes");
+                
+                if (allow)
+                {
+                    // Remove the block rules
+                    RunHiddenCommand("netsh", "advfirewall firewall delete rule name=\"LabGuard_BlockWeb\"");
+                }
+                else
+                {
+                    // Add block rules for HTTP (80) and HTTPS (443) for everything EXCEPT LabGuard
+                    // We delete first to avoid duplicates
+                    RunHiddenCommand("netsh", "advfirewall firewall delete rule name=\"LabGuard_BlockWeb\"");
+                    RunHiddenCommand("netsh", "advfirewall firewall add rule name=\"LabGuard_BlockWeb\" dir=out action=block protocol=TCP remoteport=80,443");
+                }
+                
+                _firebase.UpdateStationField(_pcName, "isInternetBlocked", (!allow).ToString().ToLower());
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Firewall error: " + ex.Message);
+            }
+        }
+
+        private void RunHiddenCommand(string fileName, string args)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo(fileName, args)
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    Verb = "runas" // Request elevation if needed, though installer usually handles this
+                };
+                Process.Start(psi)?.WaitForExit();
+            }
+            catch { }
         }
 
         private async void UnlockPC()
