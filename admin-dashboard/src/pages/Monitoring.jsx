@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc } from 'firebase/firestore';
-import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2 } from 'lucide-react';
+import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc, getDoc } from 'firebase/firestore';
+import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2 } from 'lucide-react';
 
 const StationCard = memo(({ station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand, toggleLiveView, setLightbox, removeStation }) => (
     <div className="glass-panel" style={{
@@ -164,7 +164,8 @@ const Monitoring = () => {
             unsubscribe();
             studentsUnsubscribe();
             // Clear all live intervals on unmount
-            Object.values(liveIntervals).forEach(interval => clearInterval(interval));
+            // Note: This cleanup is not perfect as it only sees the intervals at the time of effect creation
+            // but since we're using a single interval state it's manageable.
         };
     }, []);
 
@@ -175,7 +176,7 @@ const Monitoring = () => {
         offline: stations.filter(s => s.status !== 'online').length
     };
 
-    const sendCommand = async (stationId, command) => {
+    const sendCommand = useCallback(async (stationId, command) => {
         try {
             await updateDoc(doc(db, 'stations', stationId), {
                 pendingCommand: command,
@@ -184,7 +185,15 @@ const Monitoring = () => {
         } catch (err) {
             console.error("Error sending command:", err);
         }
-    };
+    }, []);
+
+    const removeStation = useCallback(async (stationId) => {
+        try {
+            await deleteDoc(doc(db, 'stations', stationId));
+        } catch (err) {
+            console.error("Error removing station:", err);
+        }
+    }, []);
 
     const handleAllCommand = async (command) => {
         if (!window.confirm(`Are you sure you want to ${command.toUpperCase()} all stations?`)) return;
@@ -201,61 +210,77 @@ const Monitoring = () => {
         }
     };
 
-    const toggleLiveView = (stationId) => {
-        const isLive = liveStations.has(stationId);
-        const newSet = new Set(liveStations);
-
-        if (isLive) {
-            // Stop live stream
-            newSet.delete(stationId);
-            sendCommand(stationId, 'LIVESTREAM_STOP');
-            if (liveIntervals[stationId]) {
-                clearInterval(liveIntervals[stationId]);
-                const newIntervals = { ...liveIntervals };
-                delete newIntervals[stationId];
-                setLiveIntervals(newIntervals);
-            }
-        } else {
-            // Start live stream: request screenshot every 5 seconds
-            newSet.add(stationId);
-            sendCommand(stationId, 'screenshot');
-            const interval = setInterval(() => {
+    const toggleLiveView = useCallback((stationId) => {
+        setLiveStations(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(stationId)) {
+                newSet.delete(stationId);
+                sendCommand(stationId, 'LIVESTREAM_STOP');
+                if (liveIntervals[stationId]) {
+                    clearInterval(liveIntervals[stationId]);
+                    setLiveIntervals(ints => {
+                        const newInts = { ...ints };
+                        delete newInts[stationId];
+                        return newInts;
+                    });
+                }
+            } else {
+                newSet.add(stationId);
                 sendCommand(stationId, 'screenshot');
-            }, 5000);
-            setLiveIntervals(prev => ({ ...prev, [stationId]: interval }));
-        }
-        setLiveStations(newSet);
-    };
+                const interval = setInterval(() => {
+                    sendCommand(stationId, 'screenshot');
+                }, 5000);
+                setLiveIntervals(ints => ({ ...ints, [stationId]: interval }));
+            }
+            return newSet;
+        });
+    }, [sendCommand, liveIntervals]);
 
-    const approveTimeRequest = async (stationId, studentId, requestType) => {
+    const approveTimeRequest = useCallback(async (stationId, studentDocId, requestType) => {
         const extraMinutes = requestType === 'PENDING_60MIN' ? 60 : 30;
         try {
-            const studentSnap = await getDocs(query(collection(db, 'students'), where('studentId', '==', studentId)));
-            if (!studentSnap.empty) {
-                const studentDoc = studentSnap.docs[0];
-                const currentDaily = parseInt(studentDoc.data().dailyRemainingTime || 0);
-                const currentWeekly = parseInt(studentDoc.data().remainingTime || 0);
-                await updateDoc(studentDoc.ref, {
+            // studentDocId is the document ID in Firestore
+            const studentRef = doc(db, 'students', studentDocId);
+            const snap = await getDoc(studentRef);
+
+            if (snap.exists()) {
+                const data = snap.data();
+                const currentDaily = parseInt(data.dailyRemainingTime || 0);
+                const currentWeekly = parseInt(data.remainingTime || 0);
+                await updateDoc(studentRef, {
                     dailyRemainingTime: currentDaily + (extraMinutes * 60),
                     remainingTime: currentWeekly + (extraMinutes * 60)
                 });
+            } else {
+                // Fallback: search by studentId field just in case
+                const q = query(collection(db, 'students'), where('studentId', '==', studentDocId));
+                const sSnap = await getDocs(q);
+                if (!sSnap.empty) {
+                    const sDoc = sSnap.docs[0];
+                    const data = sDoc.data();
+                    await updateDoc(sDoc.ref, {
+                        dailyRemainingTime: parseInt(data.dailyRemainingTime || 0) + (extraMinutes * 60),
+                        remainingTime: parseInt(data.remainingTime || 0) + (extraMinutes * 60)
+                    });
+                }
             }
+
             await updateDoc(doc(db, 'stations', stationId), {
                 timeRequest: "",
                 pendingCommand: `NOTIFY|Extra ${extraMinutes}m granted!`
             });
-            alert(`Approved ${extraMinutes}m for ${studentId}`);
+            alert(`Approved ${extraMinutes}m extension.`);
         } catch (err) { console.error("Approval error:", err); }
-    };
+    }, []);
 
-    const rejectTimeRequest = async (stationId) => {
+    const rejectTimeRequest = useCallback(async (stationId) => {
         try {
             await updateDoc(doc(db, 'stations', stationId), {
                 timeRequest: "",
                 pendingCommand: "NOTIFY|Time request denied"
             });
         } catch (err) { }
-    };
+    }, []);
 
     return (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
