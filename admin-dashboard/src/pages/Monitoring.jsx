@@ -148,7 +148,6 @@ const Monitoring = () => {
     const [totalStudents, setTotalStudents] = useState(0);
     const [liveStations, setLiveStations] = useState(new Set()); // stations in live mode
     const [lightbox, setLightbox] = useState(null); // { pcName, src } for fullscreen view
-    const [liveIntervals, setLiveIntervals] = useState({});
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, 'stations'), (snapshot) => {
@@ -163,9 +162,6 @@ const Monitoring = () => {
         return () => {
             unsubscribe();
             studentsUnsubscribe();
-            // Clear all live intervals on unmount
-            // Note: This cleanup is not perfect as it only sees the intervals at the time of effect creation
-            // but since we're using a single interval state it's manageable.
         };
     }, []);
 
@@ -216,25 +212,13 @@ const Monitoring = () => {
             if (newSet.has(stationId)) {
                 newSet.delete(stationId);
                 sendCommand(stationId, 'LIVESTREAM_STOP');
-                if (liveIntervals[stationId]) {
-                    clearInterval(liveIntervals[stationId]);
-                    setLiveIntervals(ints => {
-                        const newInts = { ...ints };
-                        delete newInts[stationId];
-                        return newInts;
-                    });
-                }
             } else {
                 newSet.add(stationId);
-                sendCommand(stationId, 'screenshot');
-                const interval = setInterval(() => {
-                    sendCommand(stationId, 'screenshot');
-                }, 5000);
-                setLiveIntervals(ints => ({ ...ints, [stationId]: interval }));
+                sendCommand(stationId, 'LIVESTREAM_START');
             }
             return newSet;
         });
-    }, [sendCommand, liveIntervals]);
+    }, [sendCommand]);
 
     const approveTimeRequest = useCallback(async (stationId, studentDocId, requestType) => {
         const extraMinutes = requestType === 'PENDING_60MIN' ? 60 : 30;

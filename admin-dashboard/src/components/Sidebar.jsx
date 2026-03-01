@@ -39,6 +39,21 @@ const Sidebar = () => {
                 {isOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
 
+            {/* Mobile Overlay */}
+            {isOpen && (
+                <div
+                    className="mobile-only"
+                    onClick={() => setIsOpen(false)}
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        zIndex: 998,
+                        backdropFilter: 'blur(4px)'
+                    }}
+                />
+            )}
+
             <aside
                 className={`glass-panel sidebar ${isOpen ? 'open' : ''}`}
                 style={{

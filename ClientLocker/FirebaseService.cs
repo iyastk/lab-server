@@ -345,19 +345,38 @@ namespace ClientLocker
         {
             try
             {
-                using (var bitmap = new System.Drawing.Bitmap((int)System.Windows.SystemParameters.PrimaryScreenWidth, (int)System.Windows.SystemParameters.PrimaryScreenHeight))
+                int screenWidth = (int)System.Windows.SystemParameters.PrimaryScreenWidth;
+                int screenHeight = (int)System.Windows.SystemParameters.PrimaryScreenHeight;
+
+                // Scale down if larger than 1280px width
+                int targetWidth = screenWidth;
+                int targetHeight = screenHeight;
+                if (screenWidth > 1280)
+                {
+                    targetWidth = 1280;
+                    targetHeight = (int)(screenHeight * (1280.0 / screenWidth));
+                }
+
+                using (var bitmap = new System.Drawing.Bitmap(screenWidth, screenHeight))
                 {
                     using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
                     {
                         graphics.CopyFromScreen(0, 0, 0, 0, bitmap.Size);
                     }
                     
-                    // Compress to JPEG for smaller footprint
-                    using (var ms = new System.IO.MemoryStream())
+                    using (var resized = new System.Drawing.Bitmap(bitmap, targetWidth, targetHeight))
                     {
-                        bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Jpeg);
-                        byte[] byteImage = ms.ToArray();
-                        return Convert.ToBase64String(byteImage);
+                        using (var ms = new System.IO.MemoryStream())
+                        {
+                            // Save as JPEG with 60% quality
+                            var encoder = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
+                            var parameters = new System.Drawing.Imaging.EncoderParameters(1);
+                            parameters.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 60L);
+
+                            resized.Save(ms, encoder, parameters);
+                            byte[] byteImage = ms.ToArray();
+                            return Convert.ToBase64String(byteImage);
+                        }
                     }
                 }
             }
