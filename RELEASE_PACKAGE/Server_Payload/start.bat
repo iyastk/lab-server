@@ -25,8 +25,14 @@ echo [OK] Node.js detected.
 :: Step 2: Check for Dependencies
 echo.
 echo [2/3] Verifying dependencies...
-if not exist "node_modules\" (
-    echo [INFO] First time setup detected. Installing required modules...
+set "INSTALL_NEEDED=0"
+
+if not exist "node_modules\" set "INSTALL_NEEDED=1"
+if not exist "node_modules\express\" set "INSTALL_NEEDED=1"
+if not exist "node_modules\sqlite3\" set "INSTALL_NEEDED=1"
+
+if "%INSTALL_NEEDED%"=="1" (
+    echo [INFO] Dependencies missing or incomplete. Starting installation...
     echo.
     npm install
     if %errorlevel% neq 0 (
@@ -39,7 +45,7 @@ if not exist "node_modules\" (
     echo.
     echo [OK] Dependencies installed successfully.
 ) else (
-    echo [OK] Dependencies already present.
+    echo [OK] Dependencies verified.
 )
 
 :: Step 3: Launching Server
