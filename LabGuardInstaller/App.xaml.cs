@@ -11,7 +11,7 @@ namespace LabGuardInstaller
         private const string DotNetDownloadUrl = "https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/runtime-desktop-6.0.28-windows-x64-installer";
         private const string AppFolderName = "LabGuard";
 
-        protected override void OnStartup(StartupEventArgs e)
+        protected override async void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
 
@@ -31,7 +31,7 @@ namespace LabGuardInstaller
                 return;
             }
 
-            InstallAndLaunch();
+            await InstallAndLaunchAsync();
         }
 
         private bool CheckDotNetRuntime()
@@ -45,7 +45,7 @@ namespace LabGuardInstaller
             catch { return false; }
         }
 
-        private void InstallAndLaunch()
+        private async System.Threading.Tasks.Task InstallAndLaunchAsync()
         {
             string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             string installPath = Path.Combine(programData, AppFolderName);
@@ -61,11 +61,19 @@ namespace LabGuardInstaller
                 
                 if (Directory.Exists(sourcePath))
                 {
-                    foreach (string file in Directory.GetFiles(sourcePath))
+                    // Run the file copy operation on a background thread to keep the UI responsive
+                    await System.Threading.Tasks.Task.Run(async () =>
                     {
-                        string dest = Path.Combine(installPath, Path.GetFileName(file));
-                        File.Copy(file, dest, true);
-                    }
+                        foreach (string file in Directory.GetFiles(sourcePath))
+                        {
+                            string dest = Path.Combine(installPath, Path.GetFileName(file));
+                            using (FileStream sourceStream = File.Open(file, FileMode.Open, FileAccess.Read))
+                            using (FileStream destStream = File.Create(dest))
+                            {
+                                await sourceStream.CopyToAsync(destStream);
+                            }
+                        }
+                    });
                     
                     MessageBox.Show("LabGuard has been installed successfully! It will now launch.", "Installation Complete");
                     Process.Start(Path.Combine(installPath, "ClientLocker.exe"));

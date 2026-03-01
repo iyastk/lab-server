@@ -9,6 +9,7 @@ namespace ClientLocker
     {
         private Timer _timer;
         private string _lastApp = "";
+        public string LastApp => _lastApp;
         public event Action<string>? OnAppChanged;
 
         public MonitoringService()
@@ -43,7 +44,17 @@ namespace ClientLocker
                 if (detailedInfo != _lastApp)
                 {
                     _lastApp = detailedInfo;
-                    OnAppChanged?.Invoke(detailedInfo);
+                    
+                    // Categorize: YouTube vs Search vs Apps
+                    string category = "General App";
+                    if (currentApp.Contains("chrome", StringComparison.OrdinalIgnoreCase) || currentApp.Contains("msedge", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (windowTitle.Contains("YouTube", StringComparison.OrdinalIgnoreCase)) category = "YouTube";
+                        else if (windowTitle.Contains("Google Search", StringComparison.OrdinalIgnoreCase)) category = "Search";
+                        else category = "Web Browsing";
+                    }
+
+                    OnAppChanged?.Invoke($"{category}|{detailedInfo}");
                 }
             }
             catch { /* Ignore brief errors during focus switches */ }

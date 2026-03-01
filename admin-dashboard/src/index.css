@@ -3,12 +3,15 @@
   --primary-hover: #4338ca;
   --bg-dark: #0f172a;
   --panel-bg: rgba(30, 41, 59, 0.7);
-  --glass: rgba(255, 255, 255, 0.05);
+  --glass: rgba(255, 255, 255, 0.06);
   --text-main: #f8fafc;
   --text-muted: #94a3b8;
   --danger: #ef4444;
   --success: #22c55e;
   --warning: #f59e0b;
+  --brand-blue: #3b82f6;
+  --primary-bg: rgba(79, 70, 229, 0.10);
+  --success-bg: rgba(34, 197, 94, 0.10);
 }
 
 * {
@@ -25,7 +28,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Animations */
+/* ── Animations ─────────────────────────────────────────── */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -44,7 +47,7 @@ body {
   }
 
   70% {
-    box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+    box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
   }
 
   100% {
@@ -52,20 +55,121 @@ body {
   }
 }
 
+@keyframes livePulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out forwards;
 }
 
+/* ── Glass Panel ────────────────────────────────────────── */
 .glass-panel {
   background: var(--panel-bg);
   backdrop-filter: blur(12px);
   border: 1px solid var(--glass);
   border-radius: 1rem;
-  transition: transform 0.2s, border-color 0.2s;
+  transition: border-color 0.2s ease;
 }
 
 .glass-panel:hover {
   border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Buttons ────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--primary);
+  border-color: transparent;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  border-radius: 7px;
+}
+
+.btn-icon {
+  padding: 9px;
+  border-radius: 9px;
+  gap: 0;
+}
+
+/* ── Badge ──────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ── Status Indicators ──────────────────────────────────── */
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
 }
 
 .status-online {
@@ -81,9 +185,10 @@ body {
   background: var(--danger);
 }
 
-/* Scrollbar styling */
+/* ── Scrollbars ─────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -96,5 +201,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none !important;
+  }
+
+  h1 {
+    font-size: 1.4rem;
+  }
 }

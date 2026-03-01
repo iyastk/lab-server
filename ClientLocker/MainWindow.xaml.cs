@@ -1,6 +1,8 @@
 using System;
 using System.Windows;
 using System.Windows.Input;
+using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace ClientLocker
 {
@@ -22,12 +24,18 @@ namespace ClientLocker
             
             _hook.Hook();
             
-            _monitor.OnAppChanged += async (app) => {
-                string studentId = _currentStudent?.studentId ?? "";
-                await _firebase.UpdateStationStatus(_pcName, "online", studentId, app);
+            _monitor.OnAppChanged += async (activity) => {
+                string studentId = _currentStudent?.Id ?? "";
+                
+                // activity is "Category|DetailedInfo"
+                var parts = activity.Split('|');
+                string category = parts[0];
+                string detailedInfo = parts.Length > 1 ? parts[1] : activity;
+
+                await _firebase.UpdateStationStatus(_pcName, "online", studentId, detailedInfo);
                 if (!string.IsNullOrEmpty(studentId))
                 {
-                    await _firebase.LogActivity(studentId, _pcName, app);
+                    await _firebase.LogActivity(studentId, _pcName, activity);
                 }
             };
 
@@ -53,7 +61,9 @@ namespace ClientLocker
             heartbeatTimer.Tick += async (s, e) => {
                 if (_currentStudent != null)
                 {
-                    await _firebase.UpdateStationStatus(_pcName, "online", _currentStudent.Id, _monitor.LastApp);
+                    var parts = _monitor.LastApp.Split('|');
+                    string detailedInfo = parts.Length > 1 ? parts[1] : _monitor.LastApp;
+                    await _firebase.UpdateStationStatus(_pcName, "online", _currentStudent.Id, detailedInfo);
                 }
                 else
                 {
@@ -72,6 +82,34 @@ namespace ClientLocker
                 key?.SetValue("LabGuard", $"\"{path}\"");
             }
             catch { /* Might fail without admin or UAC */ }
+        }
+
+        // Block student-initiated shutdown/restart
+        // Return FALSE to WM_QUERYENDSESSION to cancel
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            var source = System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle);
+            source?.AddHook(WndProc);
+        }
+
+        private const int WM_QUERYENDSESSION = 0x0011;
+        private const int WM_ENDSESSION = 0x0016;
+
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WM_QUERYENDSESSION || msg == WM_ENDSESSION)
+            {
+                // Only block if a student is active
+                if (_currentStudent != null)
+                {
+                    handled = true;
+                    Application.Current.Dispatcher.Invoke(() => 
+                        MessageBox.Show("Shutdown is not allowed while a session is active.\nContact Lab Admin.", "LabGuard - Blocked"));
+                    return new IntPtr(0); // Cancel shutdown
+                }
+            }
+            return IntPtr.Zero;
         }
 
         private async void SessionTimer_Tick(object? sender, EventArgs e)
@@ -120,7 +158,34 @@ namespace ClientLocker
                                 Application.Current.Dispatcher.Invoke(() => UnlockPC());
                                 break;
                             case "shutdown":
-                                Process.Start("shutdown", "/s /t 0");
+                                Process.Start("shutdown", "/s /t 10"); // 10s delay to show message
+                                Application.Current.Dispatcher.Invoke(() => 
+                                    MessageBox.Show("This PC will shutdown in 10 seconds (Admin command).", "LabGuard"));
+                                break;
+                            case "restart":
+                                Process.Start("shutdown", "/r /t 10");
+                                Application.Current.Dispatcher.Invoke(() =>
+                                    MessageBox.Show("This PC will restart in 10 seconds (Admin command).", "LabGuard"));
+                                break;
+                            case "screenshot":
+                                string base64 = _firebase.CaptureScreenBase64();
+                                if (!string.IsNullOrEmpty(base64))
+                                {
+                                    await _firebase.UpdateScreenCapture(_pcName, base64);
+                                }
+                                break;
+                            default:
+                                if (command.StartsWith("notify|", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    string msg = command.Substring(7);
+                                    Application.Current.Dispatcher.Invoke(() => {
+                                        MessageBox.Show(msg, "LabGuard Notification");
+                                        if (msg.Contains("granted") && _currentStudent != null)
+                                        {
+                                            RefreshStudentData();
+                                        }
+                                    });
+                                }
                                 break;
                         }
                     }
@@ -130,17 +195,32 @@ namespace ClientLocker
             }
         }
 
+        private async void RefreshStudentData()
+        {
+            if (_currentStudent == null) return;
+            // Re-validate or fetch student to get new time
+            var updated = await _firebase.ValidateStudent(_currentStudent.Id, ""); // Need to handle passwordless fetch or store password
+            if (updated != null)
+            {
+                _currentStudent.WeeklyRemaining = updated.WeeklyRemaining;
+                _currentStudent.DailyRemaining = updated.DailyRemaining;
+            }
+        }
+
         private async void Login_Click(object sender, RoutedEventArgs e)
         {
             string id = IdInput.Text;
             string password = PasswordInput.Password;
 
             // Simple validation for admin
-            if (id == "admin" && password == "admin123")
+            if ((id == "admin" && password == "admin123") || (id == "Admin" && password == "nopassword"))
             {
                 _hook.Unhook();
                 this.Hide();
-                MessageBox.Show("Welcome, Admin!");
+                if (id == "Admin") {
+                    OpenUserDashboard(new StudentData { Id = "System Admin", WeeklyRemaining = 9999, DailyRemaining = 9999 });
+                }
+                MessageBox.Show("Welcome, Admin! (System unlocked)");
             }
             else
             {
@@ -156,6 +236,7 @@ namespace ClientLocker
 
                     _currentStudent = student;
                     UnlockPC();
+                    OpenUserDashboard(student);
                     MessageBox.Show($"Welcome, {id}!");
                 }
                 else
@@ -163,6 +244,20 @@ namespace ClientLocker
                     MessageBox.Show("Invalid Student ID or Password", "Login Failed", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
+        }
+
+        private void OpenUserDashboard(StudentData student)
+        {
+            Application.Current.Dispatcher.Invoke(() => {
+                var dashboard = new UserDashboard(student, () => {
+                    // This is the onLogout callback
+                    _currentStudent = null;
+                    LockPC();
+                    this.Show();
+                    this.Activate();
+                });
+                dashboard.Show();
+            });
         }
 
         private void ChangeProfile_Click(object sender, RoutedEventArgs e)

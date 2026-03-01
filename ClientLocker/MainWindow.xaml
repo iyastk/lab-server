@@ -1,6 +1,6 @@
 <Window x:Class="ClientLocker.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2000/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2000/xaml"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="LabGuard Locker" 
         WindowStyle="None" 
         WindowState="Maximized" 
@@ -11,7 +11,7 @@
     
     <Grid>
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
-            <Border Background="rgba(30, 41, 59, 0.7)" CornerRadius="20" Padding="40">
+            <Border Background="#B21E293B" CornerRadius="20" Padding="40">
                 <StackPanel>
                     <TextBlock Text="LabGuard" FontSize="32" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,10"/>
                     <TextBlock Text="Please login to continue" Foreground="#94a3b8" HorizontalAlignment="Center" Margin="0,0,0,30"/>
@@ -38,7 +38,7 @@
         <!-- Profile Change Overlay -->
         <Border x:Name="ProfileOverlay" Visibility="Collapsed" Background="#0f172a" Grid.RowSpan="2">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
-                <Border Background="rgba(30, 41, 59, 0.7)" CornerRadius="20" Padding="40">
+                <Border Background="#B21E293B" CornerRadius="20" Padding="40">
                     <StackPanel>
                         <TextBlock Text="Modify Profile" FontSize="24" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,30"/>
                         
@@ -56,7 +56,7 @@
                         <TextBlock Text="New Password" Foreground="#94a3b8" Margin="0,0,0,5"/>
                         <PasswordBox x:Name="NewPassInput" FontSize="16" Padding="10" Margin="0,0,0,30" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>
 
-                        <Button Content="Update Credentials" Click="UpdateProfile_Click" Background="var(--success)" Foreground="White" FontSize="16" FontWeight="Bold" Padding="12" BorderThickness="0" Margin="0,0,0,10"/>
+                        <Button Content="Update Credentials" Click="UpdateProfile_Click" Background="#22c55e" Foreground="White" FontSize="16" FontWeight="Bold" Padding="12" BorderThickness="0" Margin="0,0,0,10"/>
                         <Button Content="Cancel" Click="CancelProfile_Click" Background="Transparent" Foreground="#94a3b8" FontSize="14" BorderThickness="0"/>
                     </StackPanel>
                 </Border>

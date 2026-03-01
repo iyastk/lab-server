@@ -20,11 +20,13 @@ namespace ClientLocker
     {
         private const string ProjectId = "lab-server-f6d09";
         private const string BaseUrl = "https://firestore.googleapis.com/v1/projects/" + ProjectId + "/databases/(default)/documents/";
-        private readonly HttpClient _http;
+        
+        // Use a static HttpClient to prevent socket exhaustion
+        private static readonly HttpClient _http = new HttpClient();
 
         public FirebaseService()
         {
-            _http = new HttpClient();
+            // _http is now static and initialized inline
         }
 
         public async Task<StudentData?> ValidateStudent(string studentId, string password)
@@ -43,8 +45,10 @@ namespace ClientLocker
                 foreach (var doc in documents)
                 {
                     var fields = doc["fields"];
-                    if (fields?["studentId"]?["stringValue"]?.ToString() == studentId &&
-                        fields?["password"]?["stringValue"]?.ToString() == password)
+                    string docStudentId = fields?["studentId"]?["stringValue"]?.ToString() ?? "";
+                    string docPassword = fields?["password"]?["stringValue"]?.ToString() ?? "";
+
+                    if (docStudentId == studentId && (string.IsNullOrEmpty(password) || docPassword == password))
                     {
                         return new StudentData
                         {
@@ -108,6 +112,22 @@ namespace ClientLocker
                 await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=status&updateMask.fieldPaths=currentUser&updateMask.fieldPaths=currentApp&updateMask.fieldPaths=lastSeen", content);
             }
             catch { /* Ignore status update failures */ }
+        }
+
+        public async Task UpdateStationField(string pcName, string fieldName, string value)
+        {
+            try
+            {
+                var fieldBody = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { fieldName, new { stringValue = value } }
+                };
+                var body = new { fields = fieldBody };
+                var json = JsonConvert.SerializeObject(body);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=" + fieldName, content);
+            }
+            catch { }
         }
 
         public async Task LogActivity(string studentId, string pcName, string activity)
@@ -189,6 +209,52 @@ namespace ClientLocker
             await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=pendingCommand", content);
         }
 
+        public async Task<bool> UpdateStudentProfile(string oldId, string oldPass, string newId, string newPass)
+        {
+            try
+            {
+                // First, find the student document by oldId and oldPass
+                var response = await _http.GetAsync(BaseUrl + "students");
+                if (!response.IsSuccessStatusCode) return false;
+
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                var documents = data["documents"];
+                if (documents == null) return false;
+
+                string? docId = null;
+                foreach (var doc in documents)
+                {
+                    var fields = doc["fields"];
+                    if (fields?["studentId"]?["stringValue"]?.ToString() == oldId &&
+                        fields?["password"]?["stringValue"]?.ToString() == oldPass)
+                    {
+                        docId = doc["name"].ToString().Split('/').Last();
+                        break;
+                    }
+                }
+
+                if (docId == null) return false;
+
+                // Update the document with new credentials
+                var body = new
+                {
+                    fields = new
+                    {
+                        studentId = new { stringValue = newId },
+                        password = new { stringValue = newPass }
+                    }
+                };
+
+                var json = JsonConvert.SerializeObject(body);
+                var patchContent = new StringContent(json, Encoding.UTF8, "application/json");
+
+                var patchResponse = await _http.PatchAsync(BaseUrl + "students/" + docId + "?updateMask.fieldPaths=studentId&updateMask.fieldPaths=password", patchContent);
+                return patchResponse.IsSuccessStatusCode;
+            }
+            catch { return false; }
+        }
+
         public async Task SyncOfflineLogs()
         {
             var cacheFile = "offline_logs.json";
@@ -210,6 +276,49 @@ namespace ClientLocker
                 else System.IO.File.WriteAllText(cacheFile, JsonConvert.SerializeObject(logs));
             }
             catch { }
+        }
+        public async Task UpdateScreenCapture(string pcName, string base64Image)
+        {
+            try
+            {
+                var body = new
+                {
+                    fields = new
+                    {
+                        lastScreenshot = new { stringValue = base64Image },
+                        lastScreenshotTime = new { timestampValue = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ") }
+                    }
+                };
+
+                var json = JsonConvert.SerializeObject(body);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=lastScreenshot&updateMask.fieldPaths=lastScreenshotTime", content);
+            }
+            catch { }
+        }
+
+        public string CaptureScreenBase64()
+        {
+            try
+            {
+                using (var bitmap = new System.Drawing.Bitmap((int)System.Windows.SystemParameters.PrimaryScreenWidth, (int)System.Windows.SystemParameters.PrimaryScreenHeight))
+                {
+                    using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+                    {
+                        graphics.CopyFromScreen(0, 0, 0, 0, bitmap.Size);
+                    }
+                    
+                    // Compress to JPEG for smaller footprint
+                    using (var ms = new System.IO.MemoryStream())
+                    {
+                        bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Jpeg);
+                        byte[] byteImage = ms.ToArray();
+                        return Convert.ToBase64String(byteImage);
+                    }
+                }
+            }
+            catch { return ""; }
         }
     }
 }

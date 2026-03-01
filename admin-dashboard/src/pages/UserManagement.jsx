@@ -242,10 +242,10 @@ const UserManagement = () => {
                         <tbody>
                             {users.map(user => (
                                 <tr key={user.id} style={{ borderBottom: '1px solid var(--glass)' }}>
-                                    <td style={{ padding: '15px' }}>{user.name}</td>
-                                    <td style={{ padding: '15px', color: 'var(--text-muted)' }}>{user.studentId}</td>
-                                    <td style={{ padding: '15px' }}>{user.weeklyTime}m / {user.dailyTime}m</td>
-                                    <td style={{ padding: '15px' }}>
+                                    <td data-label="Name" style={{ padding: '15px' }}>{user.name}</td>
+                                    <td data-label="ID" style={{ padding: '15px', color: 'var(--text-muted)' }}>{user.studentId}</td>
+                                    <td data-label="Quota" style={{ padding: '15px' }}>{user.weeklyTime}m / {user.dailyTime}m</td>
+                                    <td data-label="Status" style={{ padding: '15px' }}>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                             <span style={{ color: user.remainingTime < 600 ? 'var(--danger)' : 'var(--success)', fontSize: '0.9rem' }}>
                                                 W: {Math.floor(user.remainingTime / 60)} min
@@ -255,7 +255,7 @@ const UserManagement = () => {
                                             </span>
                                         </div>
                                     </td>
-                                    <td style={{ padding: '15px', display: 'flex', gap: '10px' }}>
+                                    <td data-label="Actions" style={{ padding: '15px', display: 'flex', gap: '10px' }}>
                                         <button className="btn" style={{ background: 'rgba(255,255,255,0.05)', padding: '8px' }}><Edit size={16} /></button>
                                         <button
                                             onClick={() => handleDeleteUser(user.id)}
@@ -274,6 +274,32 @@ const UserManagement = () => {
                     </table>
                 </div>
             </div>
+            <style>{`
+                @media (max-width: 768px) {
+                    .glass-panel { padding: 20px !important; }
+                    input, .btn { width: 100% !important; margin-right: 0 !important; }
+                    thead { display: none; }
+                    tr { 
+                        display: flex; 
+                        flex-direction: column; 
+                        padding: 15px 0; 
+                        border-bottom: 2px solid var(--glass) !important; 
+                    }
+                    td { 
+                        padding: 5px 15px !important; 
+                        display: flex; 
+                        justify-content: space-between; 
+                        align-items: center;
+                    }
+                    td::before {
+                        content: attr(data-label);
+                        font-weight: bold;
+                        color: var(--text-muted);
+                        font-size: 0.8rem;
+                    }
+                    .mobile-stack { flex-direction: column !important; gap: 10px !important; }
+                }
+            `}</style>
         </div>
     );
 };

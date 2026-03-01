@@ -1,30 +1,41 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
-import Monitoring from './pages/Monitoring';
-import UserManagement from './pages/UserManagement';
-import Dashboard from './pages/Dashboard';
-import History from './pages/History';
-import Download from './pages/Download';
+
+const Monitoring = lazy(() => import('./pages/Monitoring'));
+const UserManagement = lazy(() => import('./pages/UserManagement'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const History = lazy(() => import('./pages/History'));
+const Download = lazy(() => import('./pages/Download'));
+const Scheduling = lazy(() => import('./pages/Scheduling'));
+
+const Fallback = () => (
+    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+        Loading module...
+    </div>
+);
 
 function App() {
     return (
         <Router>
-            <Routes>
-                <Route path="/" element={<Layout />}>
-                    <Route index element={<Dashboard />} />
-                    <Route path="monitoring" element={<Monitoring />} />
-                    <Route path="history" element={<History />} />
-                    <Route path="users" element={<UserManagement />} />
-                    <Route path="download" element={<Download />} />
-                    <Route path="settings" element={
-                        <div className="glass-panel" style={{ padding: '30px' }}>
-                            <h1>Settings</h1>
-                            <p style={{ color: 'var(--text-muted)' }}>System and Lab configurations.</p>
-                        </div>
-                    } />
-                </Route>
-            </Routes>
+            <Suspense fallback={<Fallback />}>
+                <Routes>
+                    <Route path="/" element={<Layout />}>
+                        <Route index element={<Dashboard />} />
+                        <Route path="monitoring" element={<Monitoring />} />
+                        <Route path="history" element={<History />} />
+                        <Route path="users" element={<UserManagement />} />
+                        <Route path="download" element={<Download />} />
+                        <Route path="automation" element={<Scheduling />} />
+                        <Route path="settings" element={
+                            <div className="glass-panel" style={{ padding: '30px' }}>
+                                <h1>Settings</h1>
+                                <p style={{ color: 'var(--text-muted)' }}>System and Lab configurations.</p>
+                            </div>
+                        } />
+                    </Route>
+                </Routes>
+            </Suspense>
         </Router>
     );
 }
