@@ -12,10 +12,20 @@ namespace ClientLocker
         private FirebaseService _firebase;
         private MonitoringService _monitor;
         private System.Windows.Threading.DispatcherTimer _sessionTimer;
+        private System.Windows.Threading.DispatcherTimer _commandTimer;
         private StudentData? _currentStudent = null;
         private string _pcName = Environment.MachineName;
         private bool _allowShutdown = false;
         private bool _isLocked = true; // Default state
+
+        private void SetStatus(string msg, bool isError = false)
+        {
+            Application.Current.Dispatcher.Invoke(() => {
+                StatusLabel.Text = msg;
+                StatusLabel.Foreground = new System.Windows.Media.SolidColorBrush(
+                    isError ? System.Windows.Media.Colors.Tomato : System.Windows.Media.Color.FromRgb(100, 116, 139));
+            });
+        }
         
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool SetCursorPos(int x, int y);
@@ -64,6 +74,11 @@ namespace ClientLocker
             heartbeatTimer.Interval = TimeSpan.FromSeconds(2);
             heartbeatTimer.Tick += HeartbeatTimer_Tick;
             heartbeatTimer.Start();
+
+            _commandTimer = new System.Windows.Threading.DispatcherTimer();
+            _commandTimer.Interval = TimeSpan.FromSeconds(5);
+            _commandTimer.Tick += CommandTimer_Tick;
+            _commandTimer.Start();
 
             // Periodic sync of offline logs
             var syncTimer = new System.Windows.Threading.DispatcherTimer();
@@ -174,12 +189,22 @@ namespace ClientLocker
                 _lastHeartbeat = DateTime.Now;
 
                 await _firebase.UpdateStationStatus(_pcName, currentStatus, _currentStudent?.Id ?? "", _monitor.LastApp);
-                
-                string command = await _firebase.GetPendingCommand(_pcName);
+            }
+        }
+
+        private async void CommandTimer_Tick(object? sender, EventArgs e)
+        {
+            try
+            {
+                string? command = await _firebase.GetPendingCommand(_pcName);
                 if (!string.IsNullOrEmpty(command))
                 {
                     HandleCommand(command);
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Command Poll Error: " + ex.Message);
             }
         }
 
@@ -200,37 +225,46 @@ namespace ClientLocker
                 switch (command.ToLower())
                 {
                     case "lock":
+                        SetStatus("🔒 Command: Freezing PC...");
                         Application.Current.Dispatcher.Invoke(() => LockPC());
                         break;
                     case "unlock":
+                        SetStatus("🔓 Command: Unfreezing PC...");
                         Application.Current.Dispatcher.Invoke(() => UnlockPC());
                         break;
                     case "shutdown":
+                        SetStatus("🔌 Command: Shutting down...");
                         _allowShutdown = true;
                         Process.Start("shutdown", "/s /t 10");
                         break;
                     case "restart":
+                        SetStatus("🔄 Command: Restarting...");
                         _allowShutdown = true;
                         Process.Start("shutdown", "/r /t 10");
                         break;
                     case "screenshot":
+                        SetStatus("📸 Command: Taking Snapshot...");
                         string base64 = _firebase.CaptureScreenBase64();
                         if (!string.IsNullOrEmpty(base64))
                         {
                             await _firebase.UpdateScreenCapture(_pcName, base64);
+                            SetStatus("✅ Snapshot Sent");
                         }
                         break;
                     case "livestream_start":
+                        SetStatus("📹 Command: Live Stream Started");
                         _firebase.StartLiveStream(_pcName);
                         break;
                     case "livestream_stop":
+                        SetStatus("⏹️ Command: Live Stream Stopped");
                         _firebase.StopLiveStream();
                         break;
                     case string s when s.StartsWith("announcement|"):
                         string announcementMsg = command.Substring(13);
+                        SetStatus("📢 Command: Announcement Received");
                         Application.Current.Dispatcher.Invoke(() => {
                             var announcement = new AnnouncementWindow(announcementMsg);
-                            announcement.ShowDialog();
+                            announcement.Show(); // Use Show instead of ShowDialog to prevent blocking
                         });
                         break;
                     case string s when s.StartsWith("file_transfer|"):
@@ -238,20 +272,26 @@ namespace ClientLocker
                             var parts = command.Split('|');
                             string url = parts[1];
                             string fileName = parts[2];
+                            SetStatus($"📥 Command: Receiving file {fileName}...");
                             string? localPath = await _firebase.DownloadFile(url, fileName);
                             if (localPath != null) {
+                                SetStatus("✅ File Downloaded");
                                 Application.Current.Dispatcher.Invoke(() => {
                                     MessageBox.Show($"Administrator sent a file: {fileName}", "File Received");
                                     Process.Start("explorer.exe", $"/select,\"{localPath}\"");
                                 });
                             }
-                        } catch { }
+                        } catch { SetStatus("❌ File Transfer Failed", true); }
                         break;
                     case "internet_block":
+                        SetStatus("🌐 Command: Blocking Internet...");
                         SetInternetAccess(false);
+                        SetStatus("🚫 Internet Blocked");
                         break;
                     case "internet_allow":
+                        SetStatus("🌐 Command: Allowing Internet...");
                         SetInternetAccess(true);
+                        SetStatus("🟢 Internet Allowed");
                         break;
                 }
             }
