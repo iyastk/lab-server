@@ -3,6 +3,9 @@ using System.Windows;
 using System.Windows.Input;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace ClientLocker
 {
@@ -17,6 +20,8 @@ namespace ClientLocker
         private string _pcName = Environment.MachineName;
         private bool _allowShutdown = false;
         private bool _isLocked = true; // Default state
+        private List<FileSystemWatcher> _fileWatchers = new List<FileSystemWatcher>();
+        private HashSet<string> _recentlyRenamed = new HashSet<string>();
 
         private void SetStatus(string msg, bool isError = false)
         {
@@ -46,19 +51,21 @@ namespace ClientLocker
             _hook.Hook();
             
             _monitor.OnAppChanged += async (activity) => {
-                string studentId = _currentStudent?.Id ?? "";
+                string docId = _currentStudent?.Id ?? "";
+                string displayId = _currentStudent?.StudentId ?? "";
                 var parts = activity.Split('|');
                 string detailedInfo = parts.Length > 1 ? parts[1] : activity;
 
-                await _firebase.UpdateStationStatus(_pcName, _isLocked ? "frozen" : "online", studentId, detailedInfo);
-                if (!string.IsNullOrEmpty(studentId))
+                await _firebase.UpdateStationStatus(_pcName, _isLocked ? "frozen" : "online", docId, detailedInfo);
+                if (!string.IsNullOrEmpty(displayId))
                 {
-                    await _firebase.LogActivity(studentId, _pcName, activity);
+                    await _firebase.LogActivity(displayId, _pcName, activity);
                 }
             };
 
             _monitor.OnViolationDetected += async (keyword) => {
-                await _firebase.LogActivity(_currentStudent?.Id ?? "System", _pcName, $"VIOLATION|Banned Word: {keyword}");
+                string displayId = _currentStudent?.StudentId ?? "System";
+                await _firebase.LogActivity(displayId, _pcName, $"VIOLATION|Banned Word: {keyword}");
                 Application.Current.Dispatcher.Invoke(() => {
                     LockPC();
                     MessageBox.Show($"Access to '{keyword}' is restricted by the administrator.", "LabGuard Security Violation", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -89,18 +96,11 @@ namespace ClientLocker
             // Fetch global settings periodically
             var settingsTimer = new System.Windows.Threading.DispatcherTimer();
             settingsTimer.Interval = TimeSpan.FromMinutes(5);
-            settingsTimer.Tick += async (s, e) => {
-                var banned = await _firebase.GetGlobalBannedWords();
-                if (banned != null) _monitor.BannedKeywords = banned;
-                _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
-            };
+            settingsTimer.Tick += async (s, e) => await SyncGlobalSecurity();
             settingsTimer.Start();
             
             // Initial fetch
-            Task.Run(async () => {
-                var banned = await _firebase.GetGlobalBannedWords();
-                if (banned != null) _monitor.BannedKeywords = banned;
-            });
+            Task.Run(async () => await SyncGlobalSecurity());
 
             RegisterForStartup();
         }
@@ -213,6 +213,7 @@ namespace ClientLocker
             _isLocked = true;
             _sessionTimer.Stop();
             _monitor.Stop();
+            StopFileWatchers();
             this.Show();
             this.Topmost = true;
             _hook.Hook();
@@ -296,6 +297,43 @@ namespace ClientLocker
                         SetStatus("🌐 Command: Allowing Internet...");
                         SetInternetAccess(true);
                         SetStatus("🟢 Internet Allowed");
+                        break;
+                    case "uninstall":
+                        SetStatus("🗑️ Command: Uninstalling LabGuard...");
+                        try
+                        {
+                            // 1. Remove auto-start from HKLM
+                            try
+                            {
+                                using var lmKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+                                lmKey?.DeleteValue("LabGuard", false);
+                            }
+                            catch { }
+
+                            // 2. Remove auto-start from HKCU
+                            try
+                            {
+                                using var cuKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+                                cuKey?.DeleteValue("LabGuard", false);
+                            }
+                            catch { }
+
+                            // 3. Schedule self-deletion via cmd (runs after process exits)
+                            string exePath = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+                            string script = $"/C ping 127.0.0.1 -n 3 > nul & del /F /Q \"{exePath}\"";
+                            Process.Start(new ProcessStartInfo("cmd.exe", script) { CreateNoWindow = true, UseShellExecute = false });
+
+                            // 4. Update Firestore status and shut down cleanly
+                            await _firebase.UpdateStationStatus(_pcName, "offline");
+                            _allowShutdown = true;
+                            Application.Current.Dispatcher.Invoke(() => Application.Current.Shutdown());
+                        }
+                        catch (Exception unEx)
+                        {
+                            SetStatus("❌ Uninstall failed: " + unEx.Message, true);
+                        }
                         break;
                 }
             }
@@ -400,15 +438,30 @@ namespace ClientLocker
             _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
             _sessionTimer.Start();
             _monitor.Start();
+            StartFileWatchers();
             this.Hide();
             _hook.Unhook();
         }
 
-        private void ChangeProfile_Click(object sender, RoutedEventArgs e)
+        private async void ChangeProfile_Click(object sender, RoutedEventArgs e)
         {
             ProfileOverlay.Visibility = Visibility.Visible;
             OldIdInput.Text = IdInput.Text;
             OldPassInput.Password = PasswordInput.Password;
+
+            // Check remaining username changes and show info
+            string currentId = IdInput.Text;
+            string currentPass = PasswordInput.Password;
+            if (!string.IsNullOrEmpty(currentId) && !string.IsNullOrEmpty(currentPass))
+            {
+                int changeCount = await _firebase.GetUsernameChangeCount(currentId, currentPass);
+                int remaining = 2 - changeCount;
+                ProfileInfoText.Text = remaining > 0
+                    ? $"Username changes remaining: {remaining} of 2"
+                    : "⚠ No username changes remaining (password change only)";
+                ProfileInfoText.Foreground = new System.Windows.Media.SolidColorBrush(
+                    remaining > 0 ? System.Windows.Media.Color.FromRgb(148, 163, 184) : System.Windows.Media.Color.FromRgb(245, 158, 11));
+            }
         }
 
         private async void UpdateProfile_Click(object sender, RoutedEventArgs e)
@@ -424,17 +477,17 @@ namespace ClientLocker
                 return;
             }
 
-            bool success = await _firebase.UpdateStudentProfile(oldId, oldPass, newId, newPass);
+            var (success, message) = await _firebase.UpdateStudentProfile(oldId, oldPass, newId, newPass);
             if (success)
             {
-                MessageBox.Show("Profile updated successfully! Please login with your new credentials.");
+                MessageBox.Show(message, "Profile Updated");
                 ProfileOverlay.Visibility = Visibility.Collapsed;
                 IdInput.Text = newId;
                 PasswordInput.Password = newPass;
             }
             else
             {
-                MessageBox.Show("Failed to update profile. Please check your current credentials.");
+                MessageBox.Show(message, "Profile Update Failed");
             }
         }
 
@@ -443,9 +496,198 @@ namespace ClientLocker
             ProfileOverlay.Visibility = Visibility.Collapsed;
         }
 
+        private async Task SyncGlobalSecurity()
+        {
+            try
+            {
+                var banned = await _firebase.GetGlobalBannedWords();
+                if (banned != null) _monitor.BannedKeywords = banned;
+
+                var blockedWebsites = await _firebase.GetGlobalBlockedWebsites();
+                if (blockedWebsites != null)
+                {
+                    WebsiteBlocker.Apply(blockedWebsites);
+                }
+
+                _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Security Sync Error: " + ex.Message);
+            }
+        }
+
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
+            StopFileWatchers();
+            WebsiteBlocker.Cleanup(); // Remove blocks on exit if desired, or keep them
             base.OnClosing(e);
+        }
+
+        // ─── File Naming Rule Enforcement ──────────────────────────────────────────
+        private void StartFileWatchers()
+        {
+            StopFileWatchers();
+            if (_currentStudent == null || _currentStudent.Id == "System Admin") return;
+
+            string username = _currentStudent.StudentId;
+            if (string.IsNullOrEmpty(username)) return;
+
+            string[] watchPaths = new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads")
+            };
+
+            foreach (string dir in watchPaths)
+            {
+                if (!Directory.Exists(dir)) continue;
+                try
+                {
+                    var watcher = new FileSystemWatcher(dir)
+                    {
+                        NotifyFilter = NotifyFilters.FileName,
+                        IncludeSubdirectories = false,
+                        EnableRaisingEvents = true
+                    };
+
+                    watcher.Created += (s, e) => OnFileCreatedOrRenamed(e.FullPath, username);
+                    watcher.Renamed += (s, e) => OnFileCreatedOrRenamed(e.FullPath, username);
+
+                    _fileWatchers.Add(watcher);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"FileWatcher Error for {dir}: {ex.Message}");
+                }
+            }
+        }
+
+        private void StopFileWatchers()
+        {
+            foreach (var watcher in _fileWatchers)
+            {
+                watcher.EnableRaisingEvents = false;
+                watcher.Dispose();
+            }
+            _fileWatchers.Clear();
+            _recentlyRenamed.Clear();
+        }
+
+        private async void OnFileCreatedOrRenamed(string fullPath, string username)
+        {
+            try
+            {
+                // Skip system/hidden files and temporary files
+                string fileName = Path.GetFileName(fullPath);
+                if (string.IsNullOrEmpty(fileName)) return;
+                if (fileName.StartsWith(".") || fileName.StartsWith("~")) return;
+                if (fileName.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) return;
+                if (fileName.EndsWith(".crdownload", StringComparison.OrdinalIgnoreCase)) return;
+
+                // Prevent re-processing files we just renamed
+                if (_recentlyRenamed.Contains(fullPath)) 
+                {
+                    _recentlyRenamed.Remove(fullPath);
+                    return;
+                }
+
+                string prefix = username + "_";
+                if (fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                    fileName.StartsWith(username + ".", StringComparison.OrdinalIgnoreCase))
+                {
+                    return; // Already correctly named
+                }
+
+                // Wait for file to be released by the saving app
+                await Task.Delay(1000);
+
+                if (!File.Exists(fullPath)) return;
+
+                string dir = Path.GetDirectoryName(fullPath) ?? "";
+                string newFileName = prefix + fileName;
+                string newPath = Path.Combine(dir, newFileName);
+
+                // Handle duplicate names
+                int counter = 1;
+                while (File.Exists(newPath))
+                {
+                    string nameOnly = Path.GetFileNameWithoutExtension(fileName);
+                    string ext = Path.GetExtension(fileName);
+                    newPath = Path.Combine(dir, $"{prefix}{nameOnly}_{counter}{ext}");
+                    counter++;
+                }
+
+                _recentlyRenamed.Add(newPath);
+                File.Move(fullPath, newPath);
+
+                string displayId = _currentStudent?.StudentId ?? username;
+                await _firebase.LogActivity(displayId, _pcName, $"FILE_RULE|Renamed: {fileName} → {Path.GetFileName(newPath)}");
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    MessageBox.Show(
+                        $"Your file was renamed to follow the naming rule:\n\n{fileName}  →  {Path.GetFileName(newPath)}\n\nAll files must start with your username \"{username}\".",
+                        "LabGuard - File Naming Rule",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"File Naming Rule Error: {ex.Message}");
+            }
+        }
+    }
+
+    public static class WebsiteBlocker
+    {
+        private static readonly string HostsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"drivers\etc\hosts");
+        private const string SectionStart = "# LabGuard Blocked Websites Start";
+        private const string SectionEnd = "# LabGuard Blocked Websites End";
+
+        public static void Apply(string[] domains)
+        {
+            try
+            {
+                if (!File.Exists(HostsPath)) return;
+
+                var lines = File.ReadAllLines(HostsPath).ToList();
+                int startIdx = lines.FindIndex(l => l.Contains(SectionStart));
+                int endIdx = lines.FindIndex(l => l.Contains(SectionEnd));
+
+                if (startIdx != -1 && endIdx != -1)
+                {
+                    lines.RemoveRange(startIdx, endIdx - startIdx + 1);
+                }
+
+                if (domains != null && domains.Length > 0)
+                {
+                    lines.Add(SectionStart);
+                    foreach (var domain in domains)
+                    {
+                        string host = domain.Trim().ToLower();
+                        if (string.IsNullOrEmpty(host)) continue;
+                        lines.Add($"127.0.0.1 {host}");
+                        if (!host.StartsWith("www.")) lines.Add($"127.0.0.1 www.{host}");
+                    }
+                    lines.Add(SectionEnd);
+                }
+
+                File.WriteAllLines(HostsPath, lines);
+                
+                // Flush DNS cache to make it effective immediately
+                Process.Start(new ProcessStartInfo("ipconfig", "/flushdns") { CreateNoWindow = true, UseShellExecute = false })?.WaitForExit();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Website Blocker Error: " + ex.Message);
+            }
+        }
+
+        public static void Cleanup()
+        {
+            Apply(Array.Empty<string>());
         }
     }
 }

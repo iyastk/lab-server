@@ -29,6 +29,7 @@ const UserManagement = () => {
                 ...newUser,
                 remainingTime: newUser.weeklyTime * 60,
                 dailyRemainingTime: newUser.dailyTime * 60,
+                usernameChanges: 0,
                 status: 'offline',
                 createdAt: new Date()
             });
@@ -81,6 +82,7 @@ const UserManagement = () => {
                     dailyTime: bulkConfig.dailyTime,
                     remainingTime: bulkConfig.weeklyTime * 60,
                     dailyRemainingTime: bulkConfig.dailyTime * 60,
+                    usernameChanges: 0,
                     status: 'offline',
                     createdAt: new Date()
                 });
@@ -236,6 +238,7 @@ const UserManagement = () => {
                                 <th style={{ padding: '15px' }}>ID</th>
                                 <th style={{ padding: '15px' }}>Quota (W / D)</th>
                                 <th style={{ padding: '15px' }}>Remaining (W / D)</th>
+                                <th style={{ padding: '15px' }}>Renames</th>
                                 <th style={{ padding: '15px' }}>Actions</th>
                             </tr>
                         </thead>
@@ -255,6 +258,16 @@ const UserManagement = () => {
                                             </span>
                                         </div>
                                     </td>
+                                    <td data-label="Renames" style={{ padding: '15px' }}>
+                                        <span style={{
+                                            fontSize: '0.8rem',
+                                            color: (user.usernameChanges || 0) >= 2 ? 'var(--danger)' : 'var(--text-muted)',
+                                            background: (user.usernameChanges || 0) >= 2 ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.05)',
+                                            padding: '2px 8px', borderRadius: '6px'
+                                        }}>
+                                            {user.usernameChanges || 0}/2
+                                        </span>
+                                    </td>
                                     <td data-label="Actions" style={{ padding: '15px', display: 'flex', gap: '10px' }}>
                                         <button className="btn" style={{ background: 'rgba(255,255,255,0.05)', padding: '8px' }}><Edit size={16} /></button>
                                         <button
@@ -268,7 +281,7 @@ const UserManagement = () => {
                                 </tr>
                             ))}
                             {users.length === 0 && !loading && (
-                                <tr><td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No students enrolled yet.</td></tr>
+                                <tr><td colSpan="6" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No students enrolled yet.</td></tr>
                             )}
                         </tbody>
                     </table>

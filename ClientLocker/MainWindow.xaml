@@ -44,7 +44,8 @@
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="400">
                 <Border Background="#B21E293B" CornerRadius="20" Padding="40">
                     <StackPanel>
-                        <TextBlock Text="Modify Profile" FontSize="24" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,30"/>
+                        <TextBlock Text="Modify Profile" FontSize="24" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                        <TextBlock x:Name="ProfileInfoText" Text="" FontSize="11" Foreground="#94a3b8" HorizontalAlignment="Center" Margin="0,0,0,20" TextWrapping="Wrap"/>
                         
                         <TextBlock Text="Current Student ID" Foreground="#94a3b8" Margin="0,0,0,5"/>
                         <TextBox x:Name="OldIdInput" FontSize="16" Padding="10" Margin="0,0,0,15" Background="#1e293b" Foreground="White" BorderThickness="1" BorderBrush="#334155"/>

@@ -13,7 +13,8 @@ namespace ClientLocker
 {
     public class StudentData
     {
-        public string Id { get; set; }
+        public string Id { get; set; } // Firestore Document ID
+        public string StudentId { get; set; } // Human-readable ID (e.g. 123)
         public int WeeklyRemaining { get; set; }
         public int DailyRemaining { get; set; }
     }
@@ -55,6 +56,7 @@ namespace ClientLocker
                         return new StudentData
                         {
                             Id = doc["name"].ToString().Split('/').Last(),
+                            StudentId = docStudentId,
                             WeeklyRemaining = int.Parse(fields?["remainingTime"]?["integerValue"]?.ToString() ?? "0"),
                             DailyRemaining = int.Parse(fields?["dailyRemainingTime"]?["integerValue"]?.ToString() ?? "0")
                         };
@@ -117,8 +119,6 @@ namespace ClientLocker
 
         public async Task<string[]> GetGlobalBannedWords()
         {
-            // Assuming a helper method GetDocument exists or needs to be implemented
-            // For now, directly fetching from settings/global
             try
             {
                 var response = await _http.GetAsync(BaseUrl + "settings/global");
@@ -129,6 +129,23 @@ namespace ClientLocker
                 var fields = data["fields"];
 
                 string raw = fields?["bannedKeywords"]?["stringValue"]?.ToString() ?? "";
+                return raw.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToArray();
+            }
+            catch { return Array.Empty<string>(); }
+        }
+
+        public async Task<string[]> GetGlobalBlockedWebsites()
+        {
+            try
+            {
+                var response = await _http.GetAsync(BaseUrl + "settings/global");
+                if (!response.IsSuccessStatusCode) return Array.Empty<string>();
+
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                var fields = data["fields"];
+
+                string raw = fields?["blockedWebsites"]?["stringValue"]?.ToString() ?? "";
                 return raw.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToArray();
             }
             catch { return Array.Empty<string>(); }
@@ -289,20 +306,22 @@ namespace ClientLocker
             catch { return true; }
         }
 
-        public async Task<bool> UpdateStudentProfile(string oldId, string oldPass, string newId, string newPass)
+        /// <summary>Returns (success, message). Message explains why it failed if not successful.</summary>
+        public async Task<(bool Success, string Message)> UpdateStudentProfile(string oldId, string oldPass, string newId, string newPass)
         {
             try
             {
                 // First, find the student document by oldId and oldPass
                 var response = await _http.GetAsync(BaseUrl + "students");
-                if (!response.IsSuccessStatusCode) return false;
+                if (!response.IsSuccessStatusCode) return (false, "Could not connect to server.");
 
                 var content = await response.Content.ReadAsStringAsync();
                 var data = JObject.Parse(content);
                 var documents = data["documents"];
-                if (documents == null) return false;
+                if (documents == null) return (false, "No students found.");
 
                 string? docId = null;
+                int currentChangeCount = 0;
                 foreach (var doc in documents)
                 {
                     var fields = doc["fields"];
@@ -310,29 +329,74 @@ namespace ClientLocker
                         fields?["password"]?["stringValue"]?.ToString() == oldPass)
                     {
                         docId = doc["name"].ToString().Split('/').Last();
+                        currentChangeCount = int.Parse(fields?["usernameChanges"]?["integerValue"]?.ToString() ?? "0");
                         break;
                     }
                 }
 
-                if (docId == null) return false;
+                if (docId == null) return (false, "Invalid current credentials.");
 
-                // Update the document with new credentials
+                // Check if username is being changed (not just password)
+                bool isUsernameChange = oldId != newId;
+                if (isUsernameChange && currentChangeCount >= 2)
+                {
+                    return (false, "Username change limit reached (max 2). You can still change your password.");
+                }
+
+                int newChangeCount = isUsernameChange ? currentChangeCount + 1 : currentChangeCount;
+
+                // Update the document with new credentials + change counter
                 var body = new
                 {
                     fields = new
                     {
                         studentId = new { stringValue = newId },
-                        password = new { stringValue = newPass }
+                        password = new { stringValue = newPass },
+                        usernameChanges = new { integerValue = newChangeCount.ToString() }
                     }
                 };
 
                 var json = JsonConvert.SerializeObject(body);
                 var patchContent = new StringContent(json, Encoding.UTF8, "application/json");
 
-                var patchResponse = await _http.PatchAsync(BaseUrl + "students/" + docId + "?updateMask.fieldPaths=studentId&updateMask.fieldPaths=password", patchContent);
-                return patchResponse.IsSuccessStatusCode;
+                var patchResponse = await _http.PatchAsync(BaseUrl + "students/" + docId + "?updateMask.fieldPaths=studentId&updateMask.fieldPaths=password&updateMask.fieldPaths=usernameChanges", patchContent);
+                if (patchResponse.IsSuccessStatusCode)
+                {
+                    int remaining = 2 - newChangeCount;
+                    string msg = isUsernameChange
+                        ? $"Profile updated! Username changes remaining: {remaining}"
+                        : "Password updated successfully!";
+                    return (true, msg);
+                }
+                return (false, "Server error while updating profile.");
             }
-            catch { return false; }
+            catch (Exception ex) { return (false, "Error: " + ex.Message); }
+        }
+
+        public async Task<int> GetUsernameChangeCount(string studentId, string password)
+        {
+            try
+            {
+                var response = await _http.GetAsync(BaseUrl + "students");
+                if (!response.IsSuccessStatusCode) return 0;
+
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                var documents = data["documents"];
+                if (documents == null) return 0;
+
+                foreach (var doc in documents)
+                {
+                    var fields = doc["fields"];
+                    if (fields?["studentId"]?["stringValue"]?.ToString() == studentId &&
+                        fields?["password"]?["stringValue"]?.ToString() == password)
+                    {
+                        return int.Parse(fields?["usernameChanges"]?["integerValue"]?.ToString() ?? "0");
+                    }
+                }
+                return 0;
+            }
+            catch { return 0; }
         }
 
         public async Task SyncOfflineLogs()

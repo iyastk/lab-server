@@ -18,15 +18,20 @@ echo 2. Packaging Student Client...
 mkdir "%OUTPUT_DIR%\Client_Payload"
 cd /d "%CLIENT_DIR%"
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "%OUTPUT_DIR%\Client_Payload"
+REM Clean up any stray zip files from publish output recursively (prevents zip-inside-zip)
+powershell -Command "Get-ChildItem '%OUTPUT_DIR%\Client_Payload' -Filter '*.zip' -Recurse | Remove-Item -Force"
+powershell -Command "Get-ChildItem '%OUTPUT_DIR%\Client_Payload' -Filter '*.nupkg' -Recurse | Remove-Item -Force"
 powershell -Command "Compress-Archive -Path '%OUTPUT_DIR%\Client_Payload\*' -DestinationPath '%OUTPUT_DIR%\LabGuard_Client.zip' -Force"
+REM Verify no nested zips inside the archive
+powershell -Command "$zip = [IO.Compression.ZipFile]::OpenRead('%OUTPUT_DIR%\LabGuard_Client.zip'); $nested = $zip.Entries | Where-Object { $_.Name -like '*.zip' }; $zip.Dispose(); if ($nested) { Write-Host 'WARNING: Nested zip files still found:' -ForegroundColor Red; $nested | ForEach-Object { Write-Host $_.FullName } } else { Write-Host 'VERIFIED: No nested zip files found.' -ForegroundColor Green }"
 
 echo 3. Packaging Local Admin Server...
-mkdir "%OUTPUT_DIR%\Server_Payload"
-robocopy "%LOCAL_SERVER_DIR%" "%OUTPUT_DIR%\Server_Payload" /E /XD node_modules .git /R:0 /W:0
-powershell -Command "Compress-Archive -Path '%OUTPUT_DIR%\Server_Payload\*' -DestinationPath '%OUTPUT_DIR%\LabGuard_LocalServer.zip' -Force"
+REM Only include required files (no node_modules, no .git)
+powershell -Command "Compress-Archive -Path '%LOCAL_SERVER_DIR%\package.json','%LOCAL_SERVER_DIR%\package-lock.json','%LOCAL_SERVER_DIR%\server.js','%LOCAL_SERVER_DIR%\start.bat','%LOCAL_SERVER_DIR%\README_INSTALL.txt' -DestinationPath '%OUTPUT_DIR%\LabGuard_LocalServer.zip' -Force"
 
 echo 3b. Packaging Ubuntu Client...
 set UBUNTU_CLIENT_DIR=%ROOT_DIR%\ubuntu-client
+REM Package ubuntu client as a proper zip (NOT tar.gz)
 powershell -Command "Compress-Archive -Path '%UBUNTU_CLIENT_DIR%\*' -DestinationPath '%OUTPUT_DIR%\LabGuard_Ubuntu.zip' -Force"
 
 echo 4. Copying to Dashboard Public folder...
@@ -39,7 +44,9 @@ if exist "%OUTPUT_DIR%\LabGuard_LocalServer.zip" (
     copy /Y "%OUTPUT_DIR%\LabGuard_LocalServer.zip" "%DASHBOARD_PUBLIC%\LabGuard_LocalServer.zip"
 )
 if exist "%OUTPUT_DIR%\LabGuard_Ubuntu.zip" (
-    copy /Y "%OUTPUT_DIR%\LabGuard_Ubuntu.zip" "%DASHBOARD_PUBLIC%\LabGuard_Ubuntu.tar.gz"
+    copy /Y "%OUTPUT_DIR%\LabGuard_Ubuntu.zip" "%DASHBOARD_PUBLIC%\LabGuard_Ubuntu.zip"
+    REM Remove stale .tar.gz if it exists
+    if exist "%DASHBOARD_PUBLIC%\LabGuard_Ubuntu.tar.gz" del /Q "%DASHBOARD_PUBLIC%\LabGuard_Ubuntu.tar.gz"
 )
 
 echo ==============================================

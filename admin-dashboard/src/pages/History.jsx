@@ -1,181 +1,295 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
     collection, query, orderBy, limit, onSnapshot, getDocs,
     writeBatch, where, doc
 } from 'firebase/firestore';
 import {
-    User, Clock, Monitor, Activity, Database, ChevronRight,
-    Calendar, Layers, Search, Youtube, Globe, Cpu, X
+    User, Clock, Monitor, Activity, Database, ChevronRight, ChevronDown,
+    Calendar, Search, Youtube, Globe, Cpu, X, Sparkles, ShieldAlert,
+    RefreshCw, BarChart2, Server, Cloud, Layers
 } from 'lucide-react';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const CATEGORY_COLORS = {
-    'YouTube': { bg: 'rgba(239,68,68,0.12)', color: '#ef4444' },
-    'Search': { bg: 'rgba(251,191,36,0.12)', color: '#fbbf24' },
+// ─── Config ───────────────────────────────────────────────────────────────────
+const GEMINI_API_KEY = 'AIzaSyCTA4El4GxN79h89s-eGuj5PNfnkhP7FSI';
+const LOCAL_SERVER_URL = 'http://localhost:5000';
+const MAX_CLOUD_SESSIONS = 5; // Auto-offload when exceeding this
+
+// ─── Category Helpers ─────────────────────────────────────────────────────────
+const CATS = {
+    YouTube: { bg: 'rgba(239,68,68,0.12)', color: '#ef4444' },
+    Search: { bg: 'rgba(251,191,36,0.12)', color: '#fbbf24' },
     'Web Browsing': { bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' },
     'General App': { bg: 'rgba(139,92,246,0.12)', color: '#a78bfa' },
-    'App': { bg: 'rgba(34,197,94,0.12)', color: '#4ade80' },
+    VIOLATION: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
+    App: { bg: 'rgba(34,197,94,0.12)', color: '#4ade80' },
 };
-
-const catStyle = (cat) => CATEGORY_COLORS[cat] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' };
+const catStyle = (cat) => CATS[cat] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' };
 const catIcon = (cat) => {
     if (cat === 'YouTube') return <Youtube size={12} />;
     if (cat === 'Search') return <Search size={12} />;
     if (cat === 'Web Browsing') return <Globe size={12} />;
+    if (cat === 'VIOLATION') return <ShieldAlert size={12} />;
     return <Cpu size={12} />;
 };
-
-const fmtDuration = (s) => {
-    if (!s) return '—';
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+const parse = (raw = '') => {
+    const [cat, ...rest] = raw.split('|');
+    return { cat: cat.trim(), detail: (rest.join('|') || cat).trim() };
 };
 
-const fmtTime = (ts) => {
-    if (!ts) return '—';
-    const d = typeof ts === 'string' ? new Date(ts) : ts?.toDate?.();
-    return d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
-};
+// ─── Formatters ───────────────────────────────────────────────────────────────
+const toDate = (ts) => typeof ts === 'string' ? new Date(ts) : ts?.toDate?.();
+const fmtTime = (ts) => { const d = toDate(ts); return d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'; };
+const fmtDate = (ts) => { const d = toDate(ts); return d ? d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : '—'; };
+const fmtDur = (sec) => { if (!sec) return '—'; const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m}m ${s}s` : `${s}s`; };
 
-const fmtDate = (ts) => {
-    if (!ts) return '—';
-    const d = typeof ts === 'string' ? new Date(ts) : ts?.toDate?.();
-    return d ? d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : '—';
-};
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-const LOCAL_SERVER_URL = 'http://localhost:5000';
-
-/** Group flat activity logs into sessions (gap > 30 min = new session) */
-function groupIntoSessions(logs) {
+// ─── Session grouper (30-min gap = new session) ───────────────────────────────
+function groupSessions(logs) {
     if (!logs.length) return [];
-    const sorted = [...logs].sort((a, b) => {
-        const ta = typeof a.timestamp === 'string' ? new Date(a.timestamp) : a.timestamp?.toDate?.();
-        const tb = typeof b.timestamp === 'string' ? new Date(b.timestamp) : b.timestamp?.toDate?.();
-        return (ta || 0) - (tb || 0);
-    });
-
+    const sorted = [...logs].sort((a, b) => (toDate(a.timestamp) || 0) - (toDate(b.timestamp) || 0));
     const sessions = [];
-    let current = { logs: [sorted[0]], start: sorted[0].timestamp, end: sorted[0].timestamp };
-
+    let cur = { logs: [sorted[0]], start: sorted[0].timestamp, end: sorted[0].timestamp };
     for (let i = 1; i < sorted.length; i++) {
-        const prev = typeof sorted[i - 1].timestamp === 'string' ? new Date(sorted[i - 1].timestamp) : sorted[i - 1].timestamp?.toDate?.();
-        const curr = typeof sorted[i].timestamp === 'string' ? new Date(sorted[i].timestamp) : sorted[i].timestamp?.toDate?.();
-        const gapMin = curr && prev ? (curr - prev) / 60000 : 0;
-
-        if (gapMin > 30) {
-            sessions.push(current);
-            current = { logs: [sorted[i]], start: sorted[i].timestamp, end: sorted[i].timestamp };
-        } else {
-            current.logs.push(sorted[i]);
-            current.end = sorted[i].timestamp;
-        }
+        const gap = ((toDate(sorted[i].timestamp) || 0) - (toDate(sorted[i - 1].timestamp) || 0)) / 60000;
+        if (gap > 30) { sessions.push(cur); cur = { logs: [sorted[i]], start: sorted[i].timestamp, end: sorted[i].timestamp }; }
+        else { cur.logs.push(sorted[i]); cur.end = sorted[i].timestamp; }
     }
-    sessions.push(current);
-    return sessions.slice(-5).reverse(); // Last 5 sessions, newest first
+    sessions.push(cur);
+    return sessions.reverse(); // newest first
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ─── Category stats ───────────────────────────────────────────────────────────
+function calcStats(logs) {
+    const counts = {};
+    logs.forEach(l => { const { cat } = parse(l.activity); counts[cat] = (counts[cat] || 0) + 1; });
+    const total = logs.length || 1;
+    return Object.entries(counts).map(([cat, count]) => ({ cat, count, pct: Math.round(count / total * 100) })).sort((a, b) => b.count - a.count);
+}
+
+// ─── Gemini Prompt ────────────────────────────────────────────────────────────
+function buildPrompt(student, sessions) {
+    const name = student.name || student.studentId;
+    const allLogs = sessions.flatMap(s => s.logs);
+    const stats = calcStats(allLogs);
+    const topActivities = [...new Set(allLogs.map(l => parse(l.activity).detail))].slice(0, 25).join(', ');
+    const sessionLines = sessions.map((s, i) => {
+        const dur = Math.round(((toDate(s.end) || 0) - (toDate(s.start) || 0)) / 60000);
+        const cats = [...new Set(s.logs.map(l => parse(l.activity).cat))].join(', ');
+        return `  Session ${sessions.length - i}: ${fmtDate(s.start)}, ~${dur}m — ${cats}`;
+    }).join('\n');
+    const statLines = stats.map(s => `  ${s.cat}: ${s.count} (${s.pct}%)`).join('\n');
+
+    return `You are an educational AI assistant for a lab administrator. Analyze the lab computer usage of student "${name}" (ID: ${student.studentId}) and generate a structured "Student Usage Profile".
+
+Include these sections:
+1. **Usage Summary** – 2-3 sentences on overall patterns
+2. **Detected Interests** – bullet list of likely interests based on activity
+3. **Productivity Score** – /10 with brief reasoning (deduct for violations/gaming)
+4. **Admin Recommendations** – 2-3 actionable tips
+
+Keep the response under 220 words. Be specific and insightful.
+
+### Data (${sessions.length} sessions, ${allLogs.length} total activities):
+${sessionLines}
+
+**Activity distribution:**
+${statLines}
+
+**Observed window titles / apps (sample):**
+${topActivities}`;
+}
+
+// ─── Offload old sessions to local server ─────────────────────────────────────
+async function offloadOldSessions(studentId, allCloudDocs, sessionsToKeep) {
+    // sessionsToKeep = last MAX_CLOUD_SESSIONS sessions (already sorted newest-first)
+    const keepIds = new Set(sessionsToKeep.flatMap(s => s.logs.map(l => l.id)));
+    const toOffload = allCloudDocs.filter(d => !keepIds.has(d.id));
+    if (!toOffload.length) return;
+
+    try {
+        const payload = toOffload.map(d => ({
+            id: d.id, studentId: d.studentId, pcName: d.pcName,
+            activity: d.activity,
+            timestamp: toDate(d.timestamp)?.toISOString() || d.timestamp
+        }));
+
+        const resp = await fetch(`${LOCAL_SERVER_URL}/api/offload/logs`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logs: payload })
+        });
+        if (!resp.ok) return; // local server offline — skip silently
+
+        // Delete from Firestore
+        const batch = writeBatch(db);
+        toOffload.forEach(d => batch.delete(doc(db, 'history', d.id)));
+        await batch.commit();
+        console.log(`[AutoOffload] Moved ${toOffload.length} logs for ${studentId} to local server.`);
+    } catch {
+        // Local server not running — skip silently
+    }
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+const LogRow = ({ log }) => {
+    const { cat, detail } = parse(log.activity);
+    const cs = catStyle(cat);
+    return (
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '8px 12px', borderRadius: '8px', background: 'rgba(255,255,255,0.025)' }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem', whiteSpace: 'nowrap', minWidth: '70px' }}>{fmtTime(log.timestamp)}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', background: cs.bg, color: cs.color, padding: '2px 8px', borderRadius: '99px', fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
+                {catIcon(cat)} {cat}
+            </span>
+            <span style={{ fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }} title={detail}>{detail}</span>
+            <Monitor size={12} color="var(--text-muted)" />
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{log.pcName}</span>
+        </div>
+    );
+};
+
+const CategoryBar = ({ cat, count, pct }) => {
+    const cs = catStyle(cat);
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '110px', flexShrink: 0 }}>
+                <span style={{ color: cs.color }}>{catIcon(cat)}</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat}</span>
+            </div>
+            <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', borderRadius: '99px', height: '6px' }}>
+                <div style={{ width: `${pct}%`, background: cs.color, borderRadius: '99px', height: '6px', transition: 'width 0.6s' }} />
+            </div>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', width: '45px', textAlign: 'right' }}>{count} ({pct}%)</span>
+        </div>
+    );
+};
+
+const RenderReport = ({ text }) => text.split('\n').map((line, i) => (
+    <p key={i} style={{ margin: '4px 0', fontSize: '0.88rem', lineHeight: '1.7' }}
+        dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+));
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 const History = () => {
     const [students, setStudents] = useState([]);
-    const [selectedStudent, setSelected] = useState(null);
-    const [logs, setLogs] = useState([]);
-    const [sessions, setSessions] = useState([]);
+    const [selected, setSelected] = useState(null);
+    const [cloudLogs, setCloudLogs] = useState([]);
+    const [cloudSessions, setCloudSessions] = useState([]); // capped at 5
+    const [localLogs, setLocalLogs] = useState([]);
+    const [localSessions, setLocalSessions] = useState([]);
     const [activeSession, setActiveSession] = useState(null);
     const [filter, setFilter] = useState('All');
-    const [isSyncing, setIsSyncing] = useState(false);
+    const [loadingCloud, setLoadingCloud] = useState(false);
+    const [loadingLocal, setLoadingLocal] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
-    const [loadingLogs, setLoadingLogs] = useState(false);
-    const [viewMode, setViewMode] = useState('cloud'); // 'cloud' | 'local'
+    const [isSyncing, setIsSyncing] = useState(false);
 
-    const categories = ['All', 'YouTube', 'Search', 'Web Browsing', 'General App'];
+    // AI state
+    const [aiReport, setAiReport] = useState('');
+    const [aiLoading, setAiLoading] = useState(false);
+    const [showReport, setShowReport] = useState(false);
+    const [aiSource, setAiSource] = useState('cloud'); // 'cloud' | 'all'
 
-    // Load student list
+    const categories = ['All', 'YouTube', 'Search', 'Web Browsing', 'General App', 'VIOLATION'];
+    const allDocsRef = useRef([]); // keep raw cloud docs for offload
+
+    // Load students
     useEffect(() => {
         const q = query(collection(db, 'students'), orderBy('studentId', 'asc'));
-        const unsub = onSnapshot(q, snap => {
-            setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-        });
+        const unsub = onSnapshot(q, snap => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
         return () => unsub();
     }, []);
 
-    // Load logs for selected student
+    // Load cloud logs + auto-offload
     useEffect(() => {
-        if (!selectedStudent) return;
-        setLoadingLogs(true);
-        setLogs([]);
-        setSessions([]);
+        if (!selected) return;
+        setLoadingCloud(true);
+        setCloudLogs([]); setCloudSessions([]); setActiveSession(null);
+        setAiReport(''); setShowReport(false);
 
-        if (viewMode === 'cloud') {
-            const q = query(
-                collection(db, 'history'),
-                where('studentId', '==', selectedStudent.studentId),
-                orderBy('timestamp', 'desc'),
-                limit(500)
-            );
-            const unsub = onSnapshot(q, snap => {
-                const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                setLogs(data);
-                setSessions(groupIntoSessions(data));
-                setActiveSession(null);
-                setLoadingLogs(false);
-            }, (err) => {
-                console.error("Firestore history error:", err);
-                setLoadingLogs(false);
-                setLogs([]);
-            });
-            return () => unsub();
-        } else {
-            // Fetch from local server
-            const fetchLocal = async () => {
-                try {
-                    const resp = await fetch(`${LOCAL_SERVER_URL}/api/history?studentId=${selectedStudent.studentId}`);
-                    if (!resp.ok) throw new Error('Local server error');
-                    const data = await resp.json();
-                    setLogs(data);
-                    setSessions(groupIntoSessions(data));
-                    setActiveSession(null);
-                } catch (e) {
-                    console.error("Local history error:", e);
-                    setLogs([]);
-                } finally {
-                    setLoadingLogs(false);
-                }
-            };
-            fetchLocal();
-        }
-    }, [selectedStudent, viewMode]);
+        // Query using both human-readable ID (new client) and doc ID (old client)
+        // This ensures logs from old client versions are still visible
+        const ids = [selected.studentId, selected.id].filter(Boolean);
+        const q = query(
+            collection(db, 'history'),
+            where('studentId', 'in', ids),
+            orderBy('timestamp', 'desc'),
+            limit(500)
+        );
+        const unsub = onSnapshot(q, async (snap) => {
+            const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            allDocsRef.current = docs;
 
-    // Filter logs for active session
+            const allSessions = groupSessions(docs);
+            const sessionsToKeep = allSessions.slice(0, MAX_CLOUD_SESSIONS);
+
+            setCloudLogs(sessionsToKeep.flatMap(s => s.logs));
+            setCloudSessions(sessionsToKeep);
+            setLoadingCloud(false);
+
+            // Auto-offload sessions beyond MAX_CLOUD_SESSIONS
+            if (allSessions.length > MAX_CLOUD_SESSIONS) {
+                await offloadOldSessions(selected.studentId, docs, sessionsToKeep);
+            }
+        }, () => setLoadingCloud(false));
+
+        return () => unsub();
+    }, [selected]);
+
+    // Load local/archived logs (try both IDs to cover old+new client versions)
+    useEffect(() => {
+        if (!selected) return;
+        setLoadingLocal(true);
+        const ids = [selected.studentId, selected.id].filter(Boolean);
+        Promise.all(
+            ids.map(id => fetch(`${LOCAL_SERVER_URL}/api/history?studentId=${id}`).then(r => r.ok ? r.json() : []).catch(() => []))
+        ).then(results => {
+            // Merge and de-duplicate by id
+            const seen = new Set();
+            const merged = results.flat().filter(l => { if (seen.has(l.id)) return false; seen.add(l.id); return true; });
+            setLocalLogs(merged);
+            setLocalSessions(groupSessions(merged));
+        }).finally(() => setLoadingLocal(false));
+    }, [selected]);
+
+    // Combined data for full report
+    const allLogs = [...cloudLogs, ...localLogs];
+    const allSessions = groupSessions(allLogs);
+    const globalStats = calcStats(cloudLogs); // current cloud stats for bar chart
+
+    // Filtered logs for open session
     const sessionLogs = activeSession
-        ? activeSession.logs.filter(l => filter === 'All' || (l.activity || '').startsWith(filter))
+        ? activeSession.logs.filter(l => filter === 'All' || parse(l.activity).cat === filter)
         : [];
 
-    const handleOffload = async () => {
-        if (!window.confirm('Move cloud logs to Local Server? This cannot be undone.')) return;
+    // Generate AI report
+    const generateAI = async (source = aiSource) => {
+        const sessions = source === 'all' ? allSessions : cloudSessions;
+        if (!sessions.length) return;
+        setAiLoading(true); setShowReport(true); setAiReport(''); setAiSource(source);
+        try {
+            const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            const result = await model.generateContent(buildPrompt(selected, sessions.slice(0, 15)));
+            setAiReport(result.response.text());
+        } catch (e) {
+            const stats = calcStats(sessions.flatMap(s => s.logs));
+            setAiReport(`**Usage Summary**\n${selected.name || selected.studentId} has ${sessions.length} recorded sessions with ${sessions.flatMap(s => s.logs).length} total activities.\n\n**Activity Breakdown**\n${stats.map(s => `• ${s.cat}: ${s.pct}%`).join('\n')}\n\n**Error:** ${e.message}`);
+        } finally { setAiLoading(false); }
+    };
+
+    const handleManualOffload = async () => {
+        if (!window.confirm('Move all cloud logs to Local Server?')) return;
         setIsSyncing(true);
         try {
             const snapshot = await getDocs(collection(db, 'history'));
-            if (snapshot.empty) {
-                alert("No logs to archive.");
-                return;
-            }
-            const cloudLogs = snapshot.docs.map(d => ({
-                id: d.id, ...d.data(),
-                timestamp: d.data().timestamp?.toDate?.().toISOString() || d.data().timestamp
-            }));
-            const resp = await fetch(`${LOCAL_SERVER_URL}/api/offload/logs`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ logs: cloudLogs })
-            });
+            const logs = snapshot.docs.map(d => ({ id: d.id, ...d.data(), timestamp: toDate(d.data().timestamp)?.toISOString() || d.data().timestamp }));
+            const resp = await fetch(`${LOCAL_SERVER_URL}/api/offload/logs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logs }) });
             if (!resp.ok) throw new Error('Server rejected');
             const batch = writeBatch(db);
             snapshot.docs.forEach(d => batch.delete(d.ref));
             await batch.commit();
-            alert(`Archived ${cloudLogs.length} logs.`);
-        } catch (e) { alert('Sync error: ' + e.message); }
+            alert(`Archived ${logs.length} logs to local server.`);
+        } catch (e) { alert('Error: ' + e.message); }
         finally { setIsSyncing(false); }
     };
 
@@ -184,239 +298,238 @@ const History = () => {
         s.name?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
+    const renderSessions = (sessions, label) => (
+        <>
+            {sessions.length > 0 && (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '-6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {label === 'cloud' ? <Cloud size={12} /> : <Server size={12} />}
+                    {label === 'cloud' ? `LAST ${sessions.length} CLOUD SESSION${sessions.length > 1 ? 'S' : ''}` : `${sessions.length} ARCHIVED SESSION${sessions.length > 1 ? 'S' : ''}`}
+                    {' · CLICK TO EXPAND'}
+                </p>
+            )}
+            {sessions.map((session, idx) => {
+                const isOpen = activeSession === session;
+                const dur = Math.round(((toDate(session.end) || 0) - (toDate(session.start) || 0)) / 1000) + 30;
+                const sStats = calcStats(session.logs);
+                return (
+                    <div key={idx} className="glass-panel" style={{ overflow: 'hidden', borderLeft: label === 'cloud' ? '3px solid rgba(79,70,229,0.3)' : '3px solid rgba(34,197,94,0.3)' }}>
+                        <button onClick={() => setActiveSession(isOpen ? null : session)}
+                            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 18px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-main)', textAlign: 'left', borderBottom: isOpen ? '1px solid var(--glass)' : 'none' }}>
+                            <div style={{ background: label === 'cloud' ? 'rgba(79,70,229,0.1)' : 'rgba(34,197,94,0.1)', padding: '8px', borderRadius: '8px' }}>
+                                <Calendar size={14} color={label === 'cloud' ? 'var(--primary)' : 'var(--success)'} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>
+                                    {fmtDate(session.start)}
+                                </div>
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>
+                                    {fmtTime(session.start)} → {fmtTime(session.end)} · {fmtDur(dur)}
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', maxWidth: '180px', justifyContent: 'flex-end' }}>
+                                {sStats.slice(0, 3).map(s => {
+                                    const cs = catStyle(s.cat);
+                                    return <span key={s.cat} style={{ background: cs.bg, color: cs.color, padding: '2px 7px', borderRadius: '99px', fontSize: '0.62rem', display: 'flex', alignItems: 'center', gap: '3px' }}>{catIcon(s.cat)} {s.pct}%</span>;
+                                })}
+                            </div>
+                            <span style={{ background: 'rgba(79,70,229,0.1)', color: 'var(--primary)', padding: '2px 9px', borderRadius: '99px', fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                                {session.logs.length} events
+                            </span>
+                            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        </button>
+                        {isOpen && (
+                            <div style={{ padding: '14px 18px' }}>
+                                <div style={{ display: 'flex', gap: '6px', marginBottom: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
+                                    {categories.map(cat => {
+                                        const cnt = cat === 'All' ? session.logs.length : session.logs.filter(l => parse(l.activity).cat === cat).length;
+                                        if (cnt === 0 && cat !== 'All') return null;
+                                        return (
+                                            <button key={cat} onClick={() => setFilter(cat)}
+                                                style={{
+                                                    padding: '3px 11px', border: 'none', borderRadius: '99px', cursor: 'pointer', fontSize: '0.7rem', whiteSpace: 'nowrap',
+                                                    background: filter === cat ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                                                    color: filter === cat ? 'white' : 'var(--text-muted)', fontWeight: filter === cat ? '600' : 'normal'
+                                                }}>
+                                                {cat} {cat !== 'All' && `(${cnt})`}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '360px', overflowY: 'auto' }}>
+                                    {sessionLogs.map((log, i) => <LogRow key={i} log={log} />)}
+                                    {sessionLogs.length === 0 && <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px 0' }}>No {filter !== 'All' ? filter : ''} activity.</p>}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </>
+    );
+
     return (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                     <h1>Student History</h1>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '4px' }}>
-                        Per-student activity · Last 5 sessions stored in Firebase
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', marginTop: '4px' }}>
+                        Firebase keeps last 5 sessions · older sessions auto-archived to local server · AI profile reports
                     </p>
                 </div>
-                <button onClick={handleOffload} disabled={isSyncing} className="btn btn-primary" style={{ fontSize: '0.85rem' }}>
-                    <Database size={16} /> {isSyncing ? 'Archiving…' : 'Archive to Local'}
+                <button onClick={handleManualOffload} disabled={isSyncing} className="btn btn-primary" style={{ fontSize: '0.83rem' }}>
+                    <Database size={15} /> {isSyncing ? 'Archiving…' : 'Archive All Now'}
                 </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '20px' }}>
-                {/* ── Left Sidebar: Student List ── */}
-                <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px', height: 'fit-content', maxHeight: '80vh', overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', border: '1px solid var(--glass)' }}>
-                        <Search size={14} color="var(--text-muted)" />
-                        <input
-                            type="text"
-                            placeholder="Search students…"
-                            value={searchQuery}
-                            onChange={e => setSearchQuery(e.target.value)}
-                            style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-main)', fontSize: '0.85rem', width: '100%' }}
-                        />
+            <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: '20px' }}>
+                {/* Student list */}
+                <div className="glass-panel" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '85vh', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px', border: '1px solid var(--glass)' }}>
+                        <Search size={13} color="var(--text-muted)" />
+                        <input type="text" placeholder="Search students…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                            style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text-main)', fontSize: '0.82rem', width: '100%' }} />
                     </div>
-
-                    <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', paddingRight: '2px' }}>
+                    <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '3px' }}>
                         {filteredStudents.map(s => {
-                            const isSelected = selectedStudent?.id === s.id;
+                            const isSel = selected?.id === s.id;
                             return (
-                                <button
-                                    key={s.id}
-                                    onClick={() => { setSelected(s); setActiveSession(null); }}
+                                <button key={s.id} onClick={() => setSelected(s)}
                                     style={{
-                                        display: 'flex', alignItems: 'center', gap: '10px',
-                                        padding: '10px 12px', border: 'none', borderRadius: '8px', cursor: 'pointer',
-                                        background: isSelected ? 'rgba(79,70,229,0.15)' : 'rgba(255,255,255,0.03)',
-                                        borderLeft: isSelected ? '3px solid var(--primary)' : '3px solid transparent',
-                                        color: isSelected ? 'var(--text-main)' : 'var(--text-muted)',
-                                        textAlign: 'left', transition: 'all 0.15s'
-                                    }}
-                                >
-                                    <div style={{ background: isSelected ? 'var(--primary)' : 'rgba(255,255,255,0.06)', padding: '6px', borderRadius: '6px' }}>
-                                        <User size={14} color={isSelected ? 'white' : 'var(--text-muted)'} />
+                                        display: 'flex', alignItems: 'center', gap: '9px', padding: '9px 11px', border: 'none', borderRadius: '8px', cursor: 'pointer',
+                                        background: isSel ? 'rgba(79,70,229,0.15)' : 'rgba(255,255,255,0.03)',
+                                        borderLeft: isSel ? '3px solid var(--primary)' : '3px solid transparent',
+                                        color: isSel ? 'var(--text-main)' : 'var(--text-muted)', textAlign: 'left', transition: 'all 0.15s'
+                                    }}>
+                                    <div style={{ background: isSel ? 'var(--primary)' : 'rgba(255,255,255,0.06)', padding: '5px', borderRadius: '6px' }}>
+                                        <User size={12} color={isSel ? 'white' : 'var(--text-muted)'} />
                                     </div>
                                     <div style={{ overflow: 'hidden' }}>
-                                        <div style={{ fontSize: '0.85rem', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {s.name || s.studentId}
-                                        </div>
-                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{s.studentId}</div>
+                                        <div style={{ fontSize: '0.82rem', fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name || s.studentId}</div>
+                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{s.studentId}</div>
                                     </div>
-                                    {isSelected && <ChevronRight size={14} style={{ marginLeft: 'auto', flexShrink: 0 }} />}
+                                    {isSel && <ChevronRight size={12} style={{ marginLeft: 'auto', flexShrink: 0 }} />}
                                 </button>
                             );
                         })}
-                        {filteredStudents.length === 0 && (
-                            <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>No students found</p>
-                        )}
+                        {filteredStudents.length === 0 && <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '16px 0' }}>No students found</p>}
                     </div>
                 </div>
 
-                {/* ── Right Area ── */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div style={{ display: 'flex', gap: '8px', background: 'rgba(255,255,255,0.03)', padding: '4px', borderRadius: '12px', width: 'fit-content' }}>
-                        <button
-                            onClick={() => setViewMode('cloud')}
-                            style={{
-                                padding: '8px 16px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem',
-                                background: viewMode === 'cloud' ? 'var(--primary)' : 'transparent',
-                                color: viewMode === 'cloud' ? 'white' : 'var(--text-muted)',
-                                fontWeight: '600', transition: 'all 0.2s'
-                            }}
-                        >
-                            Cloud History
-                        </button>
-                        <button
-                            onClick={() => setViewMode('local')}
-                            style={{
-                                padding: '8px 16px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem',
-                                background: viewMode === 'local' ? 'var(--primary)' : 'transparent',
-                                color: viewMode === 'local' ? 'white' : 'var(--text-muted)',
-                                fontWeight: '600', transition: 'all 0.2s'
-                            }}
-                        >
-                            Local (Archived)
-                        </button>
-                    </div>
-
-                    {!selectedStudent ? (
+                {/* Right panel */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', minWidth: 0 }}>
+                    {!selected ? (
                         <div className="glass-panel" style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
                             <User size={48} style={{ margin: '0 auto 16px', opacity: 0.3 }} />
-                            <p style={{ fontSize: '1.1rem' }}>Select a student to view their history</p>
+                            <p style={{ fontSize: '1.1rem' }}>Select a student to view their activity</p>
                         </div>
                     ) : (
                         <>
-                            {/* Student summary card */}
-                            <div className="glass-panel" style={{ padding: '20px', display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                <div style={{ background: 'rgba(79,70,229,0.1)', padding: '16px', borderRadius: '12px' }}>
-                                    <User size={32} color="var(--primary)" />
-                                </div>
-                                <div>
-                                    <h2 style={{ margin: 0 }}>{selectedStudent.name || selectedStudent.studentId}</h2>
-                                    <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                                        ID: {selectedStudent.studentId} · {sessions.length} sessions recorded
-                                    </p>
-                                </div>
-                                <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px' }}>
-                                    <div style={{ textAlign: 'center', padding: '10px 20px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
-                                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--success)' }}>{Math.floor((selectedStudent.weeklyTime || 60) * 60 - (selectedStudent.remainingTime || 0)) > 0 ? Math.floor(((selectedStudent.weeklyTime || 60) * 60 - (selectedStudent.remainingTime || (selectedStudent.weeklyTime || 60) * 60)) / 60) : 0}m</div>
-                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Weekly Used</div>
+                            {/* Student header card */}
+                            <div className="glass-panel" style={{ padding: '20px' }}>
+                                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap', marginBottom: cloudSessions.length ? '16px' : 0 }}>
+                                    <div style={{ background: 'rgba(79,70,229,0.1)', padding: '14px', borderRadius: '12px' }}>
+                                        <User size={28} color="var(--primary)" />
                                     </div>
-                                    <div style={{ textAlign: 'center', padding: '10px 20px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
-                                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--primary)' }}>{sessions.length}</div>
-                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Sessions</div>
+                                    <div style={{ flex: 1 }}>
+                                        <h2 style={{ margin: 0, fontSize: '1.3rem' }}>{selected.name || selected.studentId}</h2>
+                                        <p style={{ margin: '3px 0 0', color: 'var(--text-muted)', fontSize: '0.83rem' }}>
+                                            ID: {selected.studentId}
+                                            <span style={{ margin: '0 8px', color: 'rgba(255,255,255,0.15)' }}>·</span>
+                                            <Cloud size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{cloudSessions.length} cloud sessions
+                                            <span style={{ margin: '0 8px', color: 'rgba(255,255,255,0.15)' }}>·</span>
+                                            <Server size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{localSessions.length} archived
+                                        </p>
                                     </div>
-                                    <div style={{ textAlign: 'center', padding: '10px 20px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
-                                        <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--warning)' }}>{logs.length}</div>
-                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Activities</div>
+
+                                    {/* Stats */}
+                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                        {[
+                                            { l: 'Cloud', v: cloudLogs.length, c: 'var(--primary)' },
+                                            { l: 'Archived', v: localLogs.length, c: 'var(--success)' },
+                                            { l: 'Total', v: allLogs.length, c: 'var(--warning)' },
+                                        ].map(s => (
+                                            <div key={s.l} style={{ textAlign: 'center', padding: '8px 16px', background: 'rgba(255,255,255,0.04)', borderRadius: '8px' }}>
+                                                <div style={{ fontSize: '1.3rem', fontWeight: 'bold', color: s.c }}>{s.v}</div>
+                                                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{s.l}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* AI report buttons */}
+                                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                        <button className="btn btn-primary" onClick={() => generateAI('cloud')} disabled={!cloudSessions.length || aiLoading}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', opacity: !cloudSessions.length ? 0.5 : 1 }}>
+                                            {aiLoading && aiSource === 'cloud' ? <RefreshCw size={14} className="spin" /> : <Sparkles size={14} />}
+                                            Recent Report
+                                        </button>
+                                        <button className="btn" onClick={() => generateAI('all')} disabled={!allSessions.length || aiLoading}
+                                            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', background: 'rgba(34,197,94,0.1)', color: 'var(--success)', opacity: !allSessions.length ? 0.5 : 1 }}>
+                                            {aiLoading && aiSource === 'all' ? <RefreshCw size={14} className="spin" /> : <Layers size={14} />}
+                                            Full Report
+                                        </button>
                                     </div>
                                 </div>
+
+                                {/* Usage breakdown bars */}
+                                {cloudSessions.length > 0 && globalStats.length > 0 && (
+                                    <div style={{ borderTop: '1px solid var(--glass)', paddingTop: '14px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                                            <BarChart2 size={13} color="var(--text-muted)" />
+                                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current Cloud Sessions — Usage Breakdown</span>
+                                        </div>
+                                        {globalStats.map(s => <CategoryBar key={s.cat} {...s} />)}
+                                    </div>
+                                )}
                             </div>
 
-                            {/* Session List */}
-                            {loadingLogs ? (
-                                <div className="glass-panel" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading history…</div>
-                            ) : sessions.length === 0 ? (
-                                <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                                    No activity recorded for this student yet.
-                                </div>
-                            ) : (
-                                <>
-                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '-6px' }}>
-                                        LAST {sessions.length} SESSION{sessions.length > 1 ? 'S' : ''} (click to expand)
-                                    </p>
-                                    {sessions.map((session, idx) => {
-                                        const isOpen = activeSession === session;
-                                        const startD = typeof session.start === 'string' ? new Date(session.start) : session.start?.toDate?.();
-                                        const endD = typeof session.end === 'string' ? new Date(session.end) : session.end?.toDate?.();
-                                        const durationSec = startD && endD ? Math.round((endD - startD) / 1000) + 30 : null;
-
-                                        return (
-                                            <div key={idx} className="glass-panel" style={{ overflow: 'hidden', transition: 'all 0.2s' }}>
-                                                {/* Session header */}
-                                                <button
-                                                    onClick={() => setActiveSession(isOpen ? null : session)}
-                                                    style={{
-                                                        width: '100%', display: 'flex', alignItems: 'center', gap: '16px',
-                                                        padding: '16px 20px', background: 'none', border: 'none', cursor: 'pointer',
-                                                        color: 'var(--text-main)', textAlign: 'left',
-                                                        borderBottom: isOpen ? '1px solid var(--glass)' : 'none'
-                                                    }}
-                                                >
-                                                    <div style={{ background: 'rgba(79,70,229,0.1)', padding: '10px', borderRadius: '8px' }}>
-                                                        <Calendar size={18} color="var(--primary)" />
-                                                    </div>
-                                                    <div style={{ flex: 1 }}>
-                                                        <div style={{ fontWeight: '600', fontSize: '0.95rem' }}>
-                                                            Session {sessions.length - idx} · {fmtDate(session.start)}
-                                                        </div>
-                                                        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '3px' }}>
-                                                            {fmtTime(session.start)} → {fmtTime(session.end)} · {fmtDuration(durationSec)}
-                                                        </div>
-                                                    </div>
-                                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginRight: '8px' }}>
-                                                        <span style={{ background: 'rgba(79,70,229,0.1)', color: 'var(--primary)', padding: '3px 10px', borderRadius: '99px', fontSize: '0.75rem' }}>
-                                                            {session.logs.length} events
-                                                        </span>
-                                                    </div>
-                                                    <ChevronRight size={16} color="var(--text-muted)"
-                                                        style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
-                                                </button>
-
-                                                {/* Session detail */}
-                                                {isOpen && (
-                                                    <div style={{ padding: '16px 20px' }}>
-                                                        {/* Category filter */}
-                                                        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
-                                                            {categories.map(cat => (
-                                                                <button key={cat} onClick={() => setFilter(cat)}
-                                                                    style={{
-                                                                        padding: '5px 14px', border: 'none', borderRadius: '99px', cursor: 'pointer', fontSize: '0.75rem', whiteSpace: 'nowrap',
-                                                                        background: filter === cat ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
-                                                                        color: filter === cat ? 'white' : 'var(--text-muted)',
-                                                                        fontWeight: filter === cat ? '600' : 'normal'
-                                                                    }}>
-                                                                    {cat}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-
-                                                        {/* Activity list */}
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '400px', overflowY: 'auto' }}>
-                                                            {sessionLogs.map((log, i) => {
-                                                                const parts = (log.activity || '').split('|');
-                                                                const cat = parts[0];
-                                                                const detail = parts.length > 1 ? parts[1] : log.activity;
-                                                                const cs = catStyle(cat);
-                                                                return (
-                                                                    <div key={i} style={{
-                                                                        display: 'flex', gap: '12px', alignItems: 'center',
-                                                                        padding: '9px 12px', borderRadius: '8px',
-                                                                        background: 'rgba(255,255,255,0.025)'
-                                                                    }}>
-                                                                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', whiteSpace: 'nowrap', minWidth: '70px' }}>
-                                                                            {fmtTime(log.timestamp)}
-                                                                        </span>
-                                                                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', background: cs.bg, color: cs.color, padding: '2px 8px', borderRadius: '99px', fontSize: '0.68rem', whiteSpace: 'nowrap' }}>
-                                                                            {catIcon(cat)} {cat}
-                                                                        </span>
-                                                                        <span style={{ fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}
-                                                                            title={detail}>
-                                                                            {detail}
-                                                                        </span>
-                                                                        <Monitor size={13} color="var(--text-muted)" />
-                                                                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{log.pcName}</span>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                            {sessionLogs.length === 0 && (
-                                                                <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px 0' }}>
-                                                                    No {filter !== 'All' ? filter : ''} activity in this session.
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )}
+                            {/* AI Report Panel */}
+                            {showReport && (
+                                <div className="glass-panel animate-fade-in" style={{ padding: '22px', border: '1px solid rgba(139,92,246,0.3)', background: 'rgba(139,92,246,0.04)' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <div style={{ background: 'rgba(139,92,246,0.15)', padding: '8px', borderRadius: '8px' }}>
+                                                <Sparkles size={16} color="#a78bfa" />
                                             </div>
-                                        );
-                                    })}
-                                </>
+                                            <div>
+                                                <h3 style={{ margin: 0, fontSize: '0.95rem' }}>AI Usage Profile — {selected.name || selected.studentId}</h3>
+                                                <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                                    {aiSource === 'all' ? `All ${allSessions.length} sessions (cloud + archived)` : `Last ${cloudSessions.length} cloud sessions`}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                            <button className="btn" style={{ fontSize: '0.78rem', padding: '5px 10px' }} onClick={() => generateAI()} disabled={aiLoading}>
+                                                <RefreshCw size={12} /> Retry
+                                            </button>
+                                            <button className="btn-icon" onClick={() => setShowReport(false)}><X size={14} /></button>
+                                        </div>
+                                    </div>
+                                    {aiLoading
+                                        ? <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-muted)', padding: '16px' }}><RefreshCw size={16} className="spin" /> Analyzing with Gemini AI…</div>
+                                        : <div style={{ color: 'var(--text-main)', lineHeight: '1.7' }}><RenderReport text={aiReport} /></div>
+                                    }
+                                </div>
+                            )}
+
+                            {/* Cloud Sessions */}
+                            {loadingCloud ? (
+                                <div className="glass-panel" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading cloud history…</div>
+                            ) : (
+                                renderSessions(cloudSessions, 'cloud')
+                            )}
+
+                            {/* Archived (local) sessions */}
+                            {loadingLocal ? (
+                                <div className="glass-panel" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>Checking local archive…</div>
+                            ) : localSessions.length > 0 ? (
+                                <>{renderSessions(localSessions, 'local')}</>
+                            ) : (
+                                cloudSessions.length === 0 && (
+                                    <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                        <Activity size={48} style={{ margin: '0 auto 16px', opacity: 0.2 }} />
+                                        <p>No activity recorded for this student yet.</p>
+                                    </div>
+                                )
                             )}
                         </>
                     )}

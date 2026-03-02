@@ -8,6 +8,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const History = lazy(() => import('./pages/History'));
 const Download = lazy(() => import('./pages/Download'));
 const Scheduling = lazy(() => import('./pages/Scheduling'));
+const Settings = lazy(() => import('./pages/Settings'));
 
 const Fallback = () => (
     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -27,17 +28,12 @@ function App() {
                         <Route path="users" element={<UserManagement />} />
                         <Route path="download" element={<Download />} />
                         <Route path="automation" element={<Scheduling />} />
-                        <Route path="settings" element={
-                            <div className="glass-panel" style={{ padding: '30px' }}>
-                                <h1>Settings</h1>
-                                <p style={{ color: 'var(--text-muted)' }}>System and Lab configurations.</p>
-                            </div>
-                        } />
+                        <Route path="settings" element={<Settings />} />
                     </Route>
                 </Routes>
                 {/* Deployment Sync Indicator */}
                 <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.5, pointerEvents: 'none', zIndex: 10000 }}>
-                    LabGuard Admin v1.9.1 (UI Redesign)
+                    LabGuard Admin v1.9.2 (Unified Controls)
                 </div>
             </Suspense>
         </Router>

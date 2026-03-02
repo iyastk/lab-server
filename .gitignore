@@ -18,3 +18,5 @@ LabGuardInstaller/obj/
 ClientLocker/bin/
 ClientLocker/obj/
 publish/
+*.zip
+RELEASE_PACKAGE/
