@@ -242,6 +242,10 @@ namespace ClientLocker
                         _allowShutdown = true;
                         Process.Start("shutdown", "/r /t 10");
                         break;
+                    case "sleep":
+                        SetStatus("💤 Command: Putting to sleep...");
+                        Process.Start("rundll32.exe", "powrprof.dll,SetSuspendState 0,1,0");
+                        break;
                     case "screenshot":
                         SetStatus("📸 Command: Taking Snapshot...");
                         string base64 = _firebase.CaptureScreenBase64();

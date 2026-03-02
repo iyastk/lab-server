@@ -104,21 +104,48 @@ const History = () => {
     useEffect(() => {
         if (!selectedStudent) return;
         setLoadingLogs(true);
-        const q = query(
-            collection(db, 'history'),
-            where('studentId', '==', selectedStudent.studentId),
-            orderBy('timestamp', 'desc'),
-            limit(500)
-        );
-        const unsub = onSnapshot(q, snap => {
-            const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            setLogs(data);
-            setSessions(groupIntoSessions(data));
-            setActiveSession(null);
-            setLoadingLogs(false);
-        });
-        return () => unsub();
-    }, [selectedStudent]);
+        setLogs([]);
+        setSessions([]);
+
+        if (viewMode === 'cloud') {
+            const q = query(
+                collection(db, 'history'),
+                where('studentId', '==', selectedStudent.studentId),
+                orderBy('timestamp', 'desc'),
+                limit(500)
+            );
+            const unsub = onSnapshot(q, snap => {
+                const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                setLogs(data);
+                setSessions(groupIntoSessions(data));
+                setActiveSession(null);
+                setLoadingLogs(false);
+            }, (err) => {
+                console.error("Firestore history error:", err);
+                setLoadingLogs(false);
+                setLogs([]);
+            });
+            return () => unsub();
+        } else {
+            // Fetch from local server
+            const fetchLocal = async () => {
+                try {
+                    const resp = await fetch(`${LOCAL_SERVER_URL}/api/history?studentId=${selectedStudent.studentId}`);
+                    if (!resp.ok) throw new Error('Local server error');
+                    const data = await resp.json();
+                    setLogs(data);
+                    setSessions(groupIntoSessions(data));
+                    setActiveSession(null);
+                } catch (e) {
+                    console.error("Local history error:", e);
+                    setLogs([]);
+                } finally {
+                    setLoadingLogs(false);
+                }
+            };
+            fetchLocal();
+        }
+    }, [selectedStudent, viewMode]);
 
     // Filter logs for active session
     const sessionLogs = activeSession
@@ -130,9 +157,13 @@ const History = () => {
         setIsSyncing(true);
         try {
             const snapshot = await getDocs(collection(db, 'history'));
+            if (snapshot.empty) {
+                alert("No logs to archive.");
+                return;
+            }
             const cloudLogs = snapshot.docs.map(d => ({
                 id: d.id, ...d.data(),
-                timestamp: d.data().timestamp?.toDate?.().toISOString()
+                timestamp: d.data().timestamp?.toDate?.().toISOString() || d.data().timestamp
             }));
             const resp = await fetch(`${LOCAL_SERVER_URL}/api/offload/logs`, {
                 method: 'POST',
@@ -219,6 +250,31 @@ const History = () => {
 
                 {/* ── Right Area ── */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'flex', gap: '8px', background: 'rgba(255,255,255,0.03)', padding: '4px', borderRadius: '12px', width: 'fit-content' }}>
+                        <button
+                            onClick={() => setViewMode('cloud')}
+                            style={{
+                                padding: '8px 16px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem',
+                                background: viewMode === 'cloud' ? 'var(--primary)' : 'transparent',
+                                color: viewMode === 'cloud' ? 'white' : 'var(--text-muted)',
+                                fontWeight: '600', transition: 'all 0.2s'
+                            }}
+                        >
+                            Cloud History
+                        </button>
+                        <button
+                            onClick={() => setViewMode('local')}
+                            style={{
+                                padding: '8px 16px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '0.85rem',
+                                background: viewMode === 'local' ? 'var(--primary)' : 'transparent',
+                                color: viewMode === 'local' ? 'white' : 'var(--text-muted)',
+                                fontWeight: '600', transition: 'all 0.2s'
+                            }}
+                        >
+                            Local (Archived)
+                        </button>
+                    </div>
+
                     {!selectedStudent ? (
                         <div className="glass-panel" style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
                             <User size={48} style={{ margin: '0 auto 16px', opacity: 0.3 }} />

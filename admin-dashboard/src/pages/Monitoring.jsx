@@ -1,186 +1,263 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc, getDoc } from 'firebase/firestore';
-import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock, Megaphone, Send, FileUp, Shield, Settings } from 'lucide-react';
+import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock, Megaphone, Send, FileUp, Shield, Settings, Moon, ChevronRight, ExternalLink, MousePointerClick } from 'lucide-react';
 
 const StationCard = memo(({
-    station, isLive, approveTimeRequest, rejectTimeRequest, sendCommand,
-    toggleLiveView, setLightbox, removeStation, sendAnnouncement, handleFileTransfer, isCommandPending, wakeStation
+    station, isLive, isSelected, onSelect, isCommandPending
 }) => (
-    <div className="glass-panel" style={{
-        padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px',
-        ...(isLive ? { borderColor: 'rgba(239,68,68,0.5)', boxShadow: '0 0 0 2px rgba(239,68,68,0.2)' } : {})
-    }}>
+    <div
+        onClick={() => onSelect(station.id)}
+        className="glass-panel"
+        style={{
+            padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px',
+            cursor: 'pointer', transition: 'all 0.2s',
+            border: isSelected ? '2px solid var(--primary)' : '1px solid var(--glass)',
+            boxShadow: isSelected ? '0 0 15px rgba(79,70,229,0.3)' : 'none',
+            background: isSelected ? 'rgba(79,70,229,0.05)' : 'rgba(255,255,255,0.02)',
+            transform: isSelected ? 'scale(1.02)' : 'scale(1)',
+            position: 'relative',
+            ...(isLive ? { borderColor: 'rgba(239,68,68,0.5)', boxShadow: '0 0 10px rgba(239,68,68,0.2)' } : {})
+        }}
+    >
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <div style={{
-                    background: station.status === 'online' ? 'rgba(34,197,94,0.1)' : 'rgba(148,163,184,0.1)',
-                    padding: '10px', borderRadius: '10px',
-                    border: `1px solid ${station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'}`
-                }}>
-                    <Monitor size={22} color={station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'} />
-                </div>
-                <div>
-                    <h3 style={{ margin: 0, fontSize: '1rem' }}>{station.pcName || station.id}</h3>
-                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        {station.currentUser ? `👤 ${station.currentUser}` : 'Available'}
-                    </p>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', overflow: 'hidden' }}>
+                <Monitor size={14} color={station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'} />
+                <div style={{ overflow: 'hidden' }}>
+                    <h3 style={{ margin: 0, fontSize: '0.85rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{station.pcName || station.id}</h3>
                 </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {isLive && <span style={{ fontSize: '0.7rem', color: 'var(--danger)', fontWeight: 'bold', animation: 'livePulse 2s infinite' }}>● LIVE</span>}
-                {station.isInternetBlocked === 'true' && <GlobeLock size={16} color="var(--danger)" title="Internet Blocked" />}
-                <span className={`status-indicator ${station.status === 'online' ? 'status-online' : 'status-offline'}`}></span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {isLive && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--danger)', animation: 'pulse 1s infinite' }} />}
+                <span className={`status-indicator ${station.status === 'online' ? 'status-online' : 'status-offline'}`} style={{ width: '8px', height: '8px' }}></span>
             </div>
-        </div>
-
-        {/* Time Request Alert */}
-        {station.timeRequest && (
-            <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning)', padding: '10px', borderRadius: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    <Clock size={14} color="var(--warning)" />
-                    <span style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--warning)' }}>Extra Time Requested</span>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => approveTimeRequest(station.id, station.currentUser, station.timeRequest)}
-                        className="btn" style={{ flex: 1, padding: '5px', fontSize: '0.75rem', background: 'var(--success)', color: 'white' }}>
-                        ✓ Approve 1h
-                    </button>
-                    <button onClick={() => rejectTimeRequest(station.id)}
-                        className="btn" style={{ flex: 1, padding: '5px', fontSize: '0.75rem', background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}>
-                        ✗ Deny
-                    </button>
-                </div>
-            </div>
-        )}
-
-        {/* Active App */}
-        {station.currentApp && !station.currentApp.includes("Idle:") && (
-            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '8px 12px', borderRadius: '8px', fontSize: '0.85rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Active: </span>{station.currentApp.split('|').pop()}
-            </div>
-        )}
-
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', opacity: isCommandPending ? 0.6 : 1, pointerEvents: isCommandPending ? 'none' : 'auto', transition: 'opacity 0.2s' }}>
-            <button className="btn" style={{ flex: 1, background: 'rgba(255,255,255,0.05)', fontSize: '0.8rem', minWidth: '80px' }}
-                onClick={() => sendCommand(station.id, station.isLocked ? 'unlock' : 'lock')}>
-                {station.isLocked ? <><Unlock size={14} /> Unlock</> : <><Lock size={14} /> Freeze</>}
-            </button>
-
-            {/* Live View Toggle */}
-            <button className="btn" title={isLive ? 'Stop Live View' : 'Start Live View (5s refresh)'}
-                style={{ background: isLive ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.1)', color: isLive ? 'var(--danger)' : 'var(--primary)' }}
-                onClick={() => toggleLiveView(station.id)}>
-                {isLive ? <VideoOff size={16} /> : <Video size={16} />}
-            </button>
-
-            {/* One-time Snapshot */}
-            <button className="btn" title="Take Snapshot" style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--primary)' }}
-                onClick={() => sendCommand(station.id, 'screenshot')}>
-                <Camera size={16} />
-            </button>
-
-            {/* Restart */}
-            <button className="btn" title="Restart PC" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--warning)' }}
-                onClick={() => { if (window.confirm(`Restart ${station.pcName || station.id}?`)) sendCommand(station.id, 'restart'); }}>
-                <RotateCcw size={16} />
-            </button>
-
-            {/* Shutdown */}
-            <button className="btn" title="Shutdown PC" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}
-                onClick={() => { if (window.confirm(`Shutdown ${station.pcName || station.id}?`)) sendCommand(station.id, 'shutdown'); }}>
-                <Power size={16} />
-            </button>
-
-            {/* Internet Control */}
-            <button className="btn" title={station.isInternetBlocked === 'true' ? 'Allow Internet' : 'Block Internet'}
-                style={{ background: station.isInternetBlocked === 'true' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: station.isInternetBlocked === 'true' ? 'var(--success)' : 'var(--danger)' }}
-                onClick={() => sendCommand(station.id, station.isInternetBlocked === 'true' ? 'INTERNET_ALLOW' : 'INTERNET_BLOCK')}>
-                {station.isInternetBlocked === 'true' ? <Globe size={16} /> : <GlobeLock size={16} />}
-            </button>
-
-            {/* Announcement */}
-            <button className="btn" title="Send Announcement" style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--primary)' }}
-                onClick={() => sendAnnouncement(station.id)}>
-                <Megaphone size={16} />
-            </button>
-
-            {/* File Transfer */}
-            <button className="btn" title="Send File" style={{ background: 'rgba(34,197,94,0.1)', color: 'var(--success)' }}
-                onClick={() => handleFileTransfer(station.id)}>
-                <FileUp size={16} />
-            </button>
-
-            {/* Wake PC */}
-            {station.status === 'offline' && station.macAddress && (
-                <button className="btn" title="Wake Computer" style={{ background: 'rgba(34,197,94,0.1)', color: 'var(--success)' }}
-                    onClick={() => wakeStation(station.macAddress)}>
-                    <Zap size={16} /> Wake
-                </button>
-            )}
-
-            {/* Remove Station */}
-            <button className="btn" title="Remove Station" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}
-                onClick={() => { if (window.confirm(`Remove ${station.pcName || station.id} from the dashboard entirely?`)) removeStation(station.id); }}>
-                <Trash2 size={16} />
-            </button>
         </div>
 
         {/* Screenshot Preview */}
-        {station.lastScreenshot && (
-            <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                        {isLive ? '🔴 Streaming' : '📷 Last Snapshot'}
-                    </span>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        {station.lastScreenshotTime?.toDate
-                            ? new Date(station.lastScreenshotTime.toDate()).toLocaleTimeString()
-                            : 'Just now'}
-                    </span>
+        <div style={{
+            aspectRatio: '16/9', background: '#000', borderRadius: '6px', overflow: 'hidden',
+            border: '1px solid rgba(255,255,255,0.05)', position: 'relative'
+        }}>
+            {station.lastScreenshot ? (
+                <img
+                    src={`data:image/jpeg;base64,${station.lastScreenshot}`}
+                    alt="Screen"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: station.status === 'online' ? 1 : 0.4 }}
+                />
+            ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.1)' }}>
+                    <Monitor size={32} />
                 </div>
-                <div style={{ position: 'relative' }}>
-                    <img
-                        src={`data:image/jpeg;base64,${station.lastScreenshot}`}
-                        alt="Screen"
-                        className="remote-screen"
-                        style={{ width: '100%', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', cursor: 'crosshair', display: 'block' }}
-                        onClick={(e) => {
-                            const rect = e.target.getBoundingClientRect();
-                            const x = Math.round(((e.clientX - rect.left) / rect.width) * 1000);
-                            const y = Math.round(((e.clientY - rect.top) / rect.height) * 1000);
-                            sendCommand(station.id, `MOUSE_CLICK|${x}|${y}`);
-                        }}
-                    />
-                    <div style={{ position: 'absolute', top: '8px', right: '8px', display: 'flex', gap: '5px' }}>
-                        <button
-                            onClick={(e) => { e.stopPropagation(); setLightbox({ pcName: station.pcName || station.id, src: station.lastScreenshot, id: station.id }); }}
-                            style={{
-                                background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '6px',
-                                color: 'white', padding: '4px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem'
-                            }}
-                        >
-                            <Maximize2 size={12} /> Full
-                        </button>
-                    </div>
-                </div>
+            )}
+
+            {/* Overlay Info */}
+            <div style={{
+                position: 'absolute', bottom: 0, left: 0, right: 0,
+                padding: '6px 8px', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+                fontSize: '0.7rem', color: 'white', display: 'flex', justifyContent: 'space-between'
+            }}>
+                <span>{station.currentUser || 'Available'}</span>
+                {station.isLocked && <Lock size={10} color="var(--warning)" />}
+            </div>
+        </div>
+
+        {/* Time Request Badge */}
+        {station.timeRequest && (
+            <div style={{
+                position: 'absolute', top: '-5px', right: '-5px',
+                background: 'var(--warning)', color: '#000',
+                padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+            }}>
+                TIME!
             </div>
         )}
     </div>
 ), (prev, next) => {
     return (
+        prev.isSelected === next.isSelected &&
         prev.isLive === next.isLive &&
         prev.station.status === next.station.status &&
         prev.station.isLocked === next.station.isLocked &&
         prev.station.currentUser === next.station.currentUser &&
-        prev.station.currentApp === next.station.currentApp &&
         prev.station.lastScreenshot === next.station.lastScreenshot &&
         prev.station.timeRequest === next.station.timeRequest
     );
 });
 
+const CommandSidebar = memo(({
+    station, isLive, onClose, sendCommand, toggleLiveView, setLightbox,
+    removeStation, sendAnnouncement, handleFileTransfer, wakeStation,
+    approveTimeRequest, rejectTimeRequest
+}) => {
+    if (!station) return (
+        <div className="glass-panel" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', borderLeft: '2px solid var(--glass)' }}>
+            <div style={{ textAlign: 'center', opacity: 0.5 }}>
+                <Monitor size={48} style={{ margin: '0 auto 16px' }} />
+                <p>Select a station to manage</p>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="glass-panel animate-slide-in-right" style={{
+            height: '100%', display: 'flex', flexDirection: 'column', gap: '20px',
+            padding: '24px', borderLeft: '2px solid var(--primary)',
+            background: 'rgba(15, 23, 42, 0.4)',
+            overflowY: 'auto'
+        }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                <div>
+                    <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{station.pcName || station.id}</h2>
+                    <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                        Station Controls
+                    </p>
+                </div>
+                <button onClick={onClose} className="btn-icon" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                    <X size={20} />
+                </button>
+            </div>
+
+            {/* Status & User */}
+            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <div style={{
+                    background: station.status === 'online' ? 'rgba(34,197,94,0.1)' : 'rgba(148,163,184,0.1)',
+                    padding: '12px', borderRadius: '10px'
+                }}>
+                    <Monitor size={24} color={station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'} />
+                </div>
+                <div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{station.currentUser || 'No User'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: station.status === 'online' ? 'var(--success)' : 'var(--text-muted)' }} />
+                        {station.status === 'online' ? 'Connected' : 'Disconnected'}
+                    </div>
+                </div>
+            </div>
+
+            {/* Time Request Alert */}
+            {station.timeRequest && (
+                <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning)', padding: '12px', borderRadius: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                        <Clock size={16} color="var(--warning)" />
+                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--warning)' }}>Extra Time Requested</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                        <button onClick={() => approveTimeRequest(station.id, station.currentUser, station.timeRequest)}
+                            className="btn" style={{ flex: 1, padding: '8px', background: 'var(--success)', color: 'white' }}>
+                            Approve
+                        </button>
+                        <button onClick={() => rejectTimeRequest(station.id)}
+                            className="btn" style={{ flex: 1, padding: '8px', background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}>
+                            Deny
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Action Groups */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '25px', overflowY: 'auto', paddingRight: '5px' }}>
+
+                {/* 1. Core Controls */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Security & Visibility</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <button
+                            className="btn"
+                            style={{ background: station.isLocked ? 'rgba(34,197,94,0.1)' : 'rgba(79,70,229,0.1)', color: station.isLocked ? 'var(--success)' : 'var(--primary)' }}
+                            onClick={() => sendCommand(station.id, station.isLocked ? 'unlock' : 'lock')}
+                        >
+                            {station.isLocked ? <><Unlock size={16} /> Unfreeze</> : <><Lock size={16} /> Freeze UI</>}
+                        </button>
+                        <button
+                            className="btn"
+                            style={{ background: isLive ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)', color: isLive ? 'var(--danger)' : 'var(--primary)' }}
+                            onClick={() => toggleLiveView(station.id)}
+                        >
+                            {isLive ? <><VideoOff size={16} /> Stop Live</> : <><Video size={16} /> Live View</>}
+                        </button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <button className="btn" style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--primary)' }}
+                            onClick={() => sendCommand(station.id, 'screenshot')}>
+                            <Camera size={16} /> Snapshot
+                        </button>
+                        <button className="btn"
+                            style={{ background: station.isInternetBlocked === 'true' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: station.isInternetBlocked === 'true' ? 'var(--success)' : 'var(--danger)' }}
+                            onClick={() => sendCommand(station.id, station.isInternetBlocked === 'true' ? 'INTERNET_ALLOW' : 'INTERNET_BLOCK')}>
+                            {station.isInternetBlocked === 'true' ? <><Globe size={16} /> Allow Net</> : <><GlobeLock size={16} /> Block Net</>}
+                        </button>
+                    </div>
+                </div>
+
+                {/* 2. Power Controls */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Power Management</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                        <button className="btn" title="Restart" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--warning)' }}
+                            onClick={() => { if (window.confirm(`Restart ${station.pcName || station.id}?`)) sendCommand(station.id, 'restart'); }}>
+                            <RotateCcw size={16} />
+                        </button>
+                        <button className="btn" title="Shutdown" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}
+                            onClick={() => { if (window.confirm(`Shutdown ${station.pcName || station.id}?`)) sendCommand(station.id, 'shutdown'); }}>
+                            <Power size={16} />
+                        </button>
+                        <button className="btn" title="Sleep" style={{ background: 'rgba(139,92,246,0.1)', color: '#a78bfa' }}
+                            onClick={() => { if (window.confirm(`Put ${station.pcName || station.id} to sleep?`)) sendCommand(station.id, 'sleep'); }}>
+                            <Moon size={16} />
+                        </button>
+                    </div>
+                    {station.status !== 'online' && station.macAddress && (
+                        <button className="btn" style={{ background: 'rgba(34,197,94,0.1)', color: 'var(--success)', width: '100%' }}
+                            onClick={() => wakeStation(station.macAddress)}>
+                            <Zap size={16} /> Wake Computer (WoL)
+                        </button>
+                    )}
+                </div>
+
+                {/* 3. Utilities */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Messaging & Tools</div>
+                    <button className="btn" style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--primary)', justifyContent: 'start' }}
+                        onClick={() => sendAnnouncement(station.id)}>
+                        <Megaphone size={16} /> Send Announcement
+                    </button>
+                    <button className="btn" style={{ background: 'rgba(34,197,94,0.1)', color: 'var(--success)', justifyContent: 'start' }}
+                        onClick={() => handleFileTransfer(station.id)}>
+                        <FileUp size={16} /> Transfer File
+                    </button>
+                </div>
+
+                {/* Information */}
+                {station.lastScreenshot && (
+                    <div style={{ marginTop: 'auto' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>Visual Preview</div>
+                        <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setLightbox({ pcName: station.pcName || station.id, src: station.lastScreenshot, id: station.id })}>
+                            <img
+                                src={`data:image/jpeg;base64,${station.lastScreenshot}`}
+                                alt="Preview"
+                                style={{ width: '100%', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}
+                            />
+                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', opacity: 0, transition: 'opacity 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px' }} onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0}>
+                                <Maximize2 size={24} color="white" />
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{ marginTop: 'auto', paddingTop: '20px', borderTop: '1px solid var(--glass)' }}>
+                <button className="btn" style={{ width: '100%', background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', fontSize: '0.8rem' }}
+                    onClick={() => { if (window.confirm(`Remove ${station.pcName || station.id}?`)) removeStation(station.id); }}>
+                    <Trash2 size={14} /> Remove Station from Lab
+                </button>
+            </div>
+        </div>
+    );
+});
 const Monitoring = () => {
     const [stations, setStations] = useState([]);
     const [totalStudents, setTotalStudents] = useState(0);
@@ -191,6 +268,7 @@ const Monitoring = () => {
     const [securitySettings, setSecuritySettings] = useState({ bannedKeywords: '', blockUninstalls: true });
     const [showSecurityModal, setShowSecurityModal] = useState(false);
     const [isGridView, setIsGridView] = useState(true);
+    const [selectedStationId, setSelectedStationId] = useState(null);
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, 'stations'), (snapshot) => {
@@ -506,25 +584,40 @@ const Monitoring = () => {
                 ))}
             </div>
 
-            {/* Stations Grid */}
-            <div className={isGridView ? "stations-grid" : "stations-list"}>
-                {stations.map(station => (
-                    <StationCard
-                        key={station.id}
-                        station={station}
-                        isLive={liveStations.has(station.id)}
-                        approveTimeRequest={approveTimeRequest}
-                        rejectTimeRequest={rejectTimeRequest}
-                        sendCommand={sendCommand}
-                        toggleLiveView={toggleLiveView}
-                        setLightbox={setLightbox}
-                        removeStation={removeStation}
-                        sendAnnouncement={sendAnnouncement}
-                        handleFileTransfer={handleFileTransfer}
-                        isCommandPending={isCommandPending}
-                        wakeStation={wakeStation}
-                    />
-                ))}
+            {/* Stations Grid Area */}
+            <div style={{ display: 'flex', gap: '20px', flex: 1, minHeight: 0 }}>
+                <div style={{ flex: 1, overflowY: 'auto', paddingRight: '10px' }} className={isGridView ? "stations-grid" : "stations-list"}>
+                    {stations.map(station => (
+                        <StationCard
+                            key={station.id}
+                            station={station}
+                            isLive={liveStations.has(station.id)}
+                            isSelected={selectedStationId === station.id}
+                            onSelect={setSelectedStationId}
+                            isCommandPending={isCommandPending}
+                        />
+                    ))}
+                </div>
+
+                {/* Command Sidebar */}
+                {selectedStationId && (
+                    <div style={{ width: '320px', flexShrink: 0 }} className="animate-slide-in-right">
+                        <CommandSidebar
+                            station={stations.find(s => s.id === selectedStationId)}
+                            isLive={liveStations.has(selectedStationId)}
+                            onClose={() => setSelectedStationId(null)}
+                            sendCommand={sendCommand}
+                            toggleLiveView={toggleLiveView}
+                            setLightbox={setLightbox}
+                            removeStation={removeStation}
+                            sendAnnouncement={sendAnnouncement}
+                            handleFileTransfer={handleFileTransfer}
+                            wakeStation={wakeStation}
+                            approveTimeRequest={approveTimeRequest}
+                            rejectTimeRequest={rejectTimeRequest}
+                        />
+                    </div>
+                )}
             </div>
 
             {/* Security Settings Modal */}
