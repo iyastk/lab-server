@@ -7,8 +7,12 @@ import {
     X
 } from 'lucide-react';
 
+import { LucideIcon } from 'lucide-react';
+import { Station } from '../types';
+
 // ─── Section Wrapper ──────────────────────────────────────────────────────────
-const Section = ({ icon: Icon, title, color = 'var(--primary)', children }) => (
+interface SectionProps { icon: LucideIcon; title: string; color?: string; children: React.ReactNode; }
+const Section = ({ icon: Icon, title, color = 'var(--primary)', children }: SectionProps) => (
     <div className="glass-panel animate-fade-in" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '20px', borderTop: `3px solid ${color}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ background: `${color}18`, padding: '10px', borderRadius: '10px' }}>
@@ -21,7 +25,8 @@ const Section = ({ icon: Icon, title, color = 'var(--primary)', children }) => (
 );
 
 // ─── Field Row ─────────────────────────────────────────────────────────────
-const Field = ({ label, hint, children }) => (
+interface FieldProps { label: string; hint?: string; children: React.ReactNode; }
+const Field = ({ label, hint, children }: FieldProps) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>{label}</label>
         {children}
@@ -29,7 +34,7 @@ const Field = ({ label, hint, children }) => (
     </div>
 );
 
-const inputStyle = {
+const inputStyle: React.CSSProperties = {
     background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass)',
     borderRadius: '8px', padding: '10px 14px', color: 'var(--text-main)',
     fontSize: '0.9rem', fontFamily: 'inherit', width: '100%'
@@ -43,24 +48,24 @@ const SettingsPage = () => {
     // Lab Config
     const [labName, setLabName] = useState('Computer Lab');
     const [adminEmail, setAdminEmail] = useState('');
-    const [maxSessions, setMaxSessions] = useState(30);
+    const [maxSessions, setMaxSessions] = useState('30');
 
     // Time Quotas (in minutes)
-    const [defaultDaily, setDefaultDaily] = useState(120);
-    const [defaultWeekly, setDefaultWeekly] = useState(600);
+    const [defaultDaily, setDefaultDaily] = useState('120');
+    const [defaultWeekly, setDefaultWeekly] = useState('600');
 
     // Security Defaults
-    const [bannedKeywords, setBannedKeywords] = useState([]);
+    const [bannedKeywords, setBannedKeywords] = useState<string[]>([]);
     const [keywordInput, setKeywordInput] = useState('');
-    const [blockedWebsites, setBlockedWebsites] = useState([]);
+    const [blockedWebsites, setBlockedWebsites] = useState<string[]>([]);
     const [websiteInput, setWebsiteInput] = useState('');
     const [blockUninstalls, setBlockUninstalls] = useState(true);
-    const [screenshotInterval, setScreenshotInterval] = useState(30);
+    const [screenshotInterval, setScreenshotInterval] = useState('30');
 
     // Remote Management
     const [uninstallStatus, setUninstallStatus] = useState('');
     const [isUninstalling, setIsUninstalling] = useState(false);
-    const [stations, setStations] = useState([]);
+    const [stations, setStations] = useState<Station[]>([]);
 
     useEffect(() => {
         const load = async () => {
@@ -70,24 +75,24 @@ const SettingsPage = () => {
                     const d = labSnap.data();
                     setLabName(d.labName ?? 'Computer Lab');
                     setAdminEmail(d.adminEmail ?? '');
-                    setMaxSessions(d.maxSessions ?? 30);
-                    setDefaultDaily(d.defaultDailyMinutes ?? 120);
-                    setDefaultWeekly(d.defaultWeeklyMinutes ?? 600);
+                    setMaxSessions(String(d.maxSessions ?? 30));
+                    setDefaultDaily(String(d.defaultDailyMinutes ?? 120));
+                    setDefaultWeekly(String(d.defaultWeeklyMinutes ?? 600));
                     setBlockUninstalls(d.blockUninstalls ?? true);
-                    setScreenshotInterval(d.screenshotInterval ?? 30);
+                    setScreenshotInterval(String(d.screenshotInterval ?? 30));
                 }
 
                 // Global Security
                 const globalSnap = await getDoc(doc(db, 'settings', 'global'));
                 if (globalSnap.exists()) {
                     const d = globalSnap.data();
-                    setBannedKeywords(d.bannedKeywords ? d.bannedKeywords.split(',').filter(s => s) : []);
-                    setBlockedWebsites(d.blockedWebsites ? d.blockedWebsites.split(',').filter(s => s) : []);
+                    setBannedKeywords(d.bannedKeywords ? d.bannedKeywords.split(',').filter((s: string) => s) : []);
+                    setBlockedWebsites(d.blockedWebsites ? d.blockedWebsites.split(',').filter((s: string) => s) : []);
                 }
 
                 // Load stations for uninstall picker
                 const stSnap = await getDocs(collection(db, 'stations'));
-                setStations(stSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+                setStations(stSnap.docs.map(d => ({ id: d.id, ...d.data() } as Station)));
             } catch { }
             setLoading(false);
         };
@@ -98,11 +103,12 @@ const SettingsPage = () => {
         try {
             // Lab config
             await setDoc(doc(db, 'settings', 'lab'), {
-                labName, adminEmail, maxSessions: parseInt(maxSessions),
-                defaultDailyMinutes: parseInt(defaultDaily),
-                defaultWeeklyMinutes: parseInt(defaultWeekly),
+                labName, adminEmail,
+                maxSessions: parseInt(maxSessions) || 30,
+                defaultDailyMinutes: parseInt(defaultDaily) || 120,
+                defaultWeeklyMinutes: parseInt(defaultWeekly) || 600,
                 blockUninstalls,
-                screenshotInterval: parseInt(screenshotInterval),
+                screenshotInterval: parseInt(screenshotInterval) || 30,
             }, { merge: true });
 
             // Global security
@@ -113,7 +119,7 @@ const SettingsPage = () => {
 
             setSaved(true);
             setTimeout(() => setSaved(false), 3000);
-        } catch (e) {
+        } catch (e: any) {
             alert('Failed to save settings: ' + e.message);
         }
     };
@@ -124,24 +130,44 @@ const SettingsPage = () => {
         setUninstallStatus('Sending uninstall command to all stations...');
         try {
             const batch = writeBatch(db);
-            stations.filter(s => s.status === 'online').forEach(s => {
-                batch.update(doc(db, 'stations', s.id), { command: 'uninstall', commandAt: Date.now() });
+            const onlineStations = stations.filter(s => s.status === 'online');
+            onlineStations.forEach(s => {
+                // Use 'pendingCommand' — the field the client polls every 5 seconds
+                batch.update(doc(db, 'stations', s.id), { pendingCommand: 'uninstall', commandTimestamp: new Date() });
             });
             await batch.commit();
-            setUninstallStatus(`✅ Uninstall sent to ${stations.filter(s => s.status === 'online').length} online station(s). Clients will remove themselves shortly.`);
-        } catch (e) {
+            setUninstallStatus(`✅ Uninstall sent to ${onlineStations.length} online station(s). Clients will remove themselves shortly.`);
+        } catch (e: any) {
             setUninstallStatus('❌ Failed: ' + e.message);
         }
         setIsUninstalling(false);
     };
 
-    const sendUninstallToOne = async (stationId) => {
+    const sendUninstallToOne = async (stationId: string) => {
         if (!window.confirm(`Uninstall LabGuard from station "${stationId}"?`)) return;
         try {
-            await setDoc(doc(db, 'stations', stationId), { command: 'uninstall', commandAt: Date.now() }, { merge: true });
+            // Use 'pendingCommand' — the field the client polls every 5 seconds
+            await setDoc(doc(db, 'stations', stationId), { pendingCommand: 'uninstall', commandTimestamp: new Date() }, { merge: true });
             setUninstallStatus(`✅ Uninstall command sent to ${stationId}.`);
-        } catch (e) {
+        } catch (e: any) {
             setUninstallStatus('❌ Failed: ' + e.message);
+        }
+    };
+
+    const sendAnnouncement = async () => {
+        const msg = window.prompt('Enter announcement message to broadcast to all online stations:');
+        if (!msg?.trim()) return;
+        try {
+            const batch = writeBatch(db);
+            const onlineStations = stations.filter(s => s.status === 'online');
+            onlineStations.forEach(s => {
+                // Lowercase prefix so the client switch-case matches after .ToLower()
+                batch.update(doc(db, 'stations', s.id), { pendingCommand: `announcement|${msg}`, commandTimestamp: new Date() });
+            });
+            await batch.commit();
+            alert(`📢 Announcement sent to ${onlineStations.length} online station(s).`);
+        } catch (e: any) {
+            alert('Failed to send announcement: ' + e.message);
         }
     };
 
@@ -189,7 +215,7 @@ const SettingsPage = () => {
                     </Field>
                 </div>
                 <div style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: '10px', padding: '12px 16px', fontSize: '0.83rem', color: 'var(--text-muted)' }}>
-                    💡 Daily: <strong>{Math.floor(defaultDaily / 60)}h {defaultDaily % 60}m</strong> &nbsp;|&nbsp; Weekly: <strong>{Math.floor(defaultWeekly / 60)}h {defaultWeekly % 60}m</strong>
+                    💡 Daily: <strong>{Math.floor(parseInt(defaultDaily || '0') / 60)}h {parseInt(defaultDaily || '0') % 60}m</strong> &nbsp;|&nbsp; Weekly: <strong>{Math.floor(parseInt(defaultWeekly || '0') / 60)}h {parseInt(defaultWeekly || '0') % 60}m</strong>
                 </div>
             </Section>
 
@@ -326,6 +352,14 @@ const SettingsPage = () => {
                         Bulk Actions
                     </div>
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        <button
+                            className="btn"
+                            style={{ background: 'rgba(59,130,246,0.1)', color: 'var(--primary)' }}
+                            onClick={sendAnnouncement}
+                            disabled={stations.filter(s => s.status === 'online').length === 0}
+                        >
+                            <Terminal size={16} /> Broadcast Announcement
+                        </button>
                         <button
                             className="btn"
                             style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}

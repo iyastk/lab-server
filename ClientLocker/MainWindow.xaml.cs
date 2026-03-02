@@ -19,7 +19,8 @@ namespace ClientLocker
         private StudentData? _currentStudent = null;
         private string _pcName = Environment.MachineName;
         private bool _allowShutdown = false;
-        private bool _isLocked = true; // Default state
+        private bool _isLocked = true;
+        private bool _isAdmin = false;  // Set when admin logs in — bypasses all time limits
         private List<FileSystemWatcher> _fileWatchers = new List<FileSystemWatcher>();
         private HashSet<string> _recentlyRenamed = new HashSet<string>();
 
@@ -83,7 +84,7 @@ namespace ClientLocker
             heartbeatTimer.Start();
 
             _commandTimer = new System.Windows.Threading.DispatcherTimer();
-            _commandTimer.Interval = TimeSpan.FromSeconds(5);
+            _commandTimer.Interval = TimeSpan.FromSeconds(3); // Reduced from 5s for snappier command response
             _commandTimer.Tick += CommandTimer_Tick;
             _commandTimer.Start();
 
@@ -158,15 +159,20 @@ namespace ClientLocker
         {
             if (_currentStudent == null) return;
 
+            // Admins get unlimited time — skip all decrement logic
+            if (_isAdmin) return;
+
             _currentStudent.WeeklyRemaining--;
             _currentStudent.DailyRemaining--;
 
             if (_currentStudent.WeeklyRemaining <= 0 || _currentStudent.DailyRemaining <= 0)
             {
                 LockPC();
+                return;
             }
 
-            if (_currentStudent.WeeklyRemaining % 60 == 0)
+            // Sync to Firestore every 30 seconds for better accuracy (was every 60s)
+            if (_currentStudent.WeeklyRemaining % 30 == 0)
             {
                 await _firebase.UpdateStudentTime(_currentStudent.Id, _currentStudent.WeeklyRemaining, _currentStudent.DailyRemaining);
             }
@@ -265,11 +271,18 @@ namespace ClientLocker
                         _firebase.StopLiveStream();
                         break;
                     case string s when s.StartsWith("announcement|"):
-                        string announcementMsg = command.Substring(13);
+                        string announcementMsg = command.ToLower().Substring("announcement|".Length);
                         SetStatus("📢 Command: Announcement Received");
                         Application.Current.Dispatcher.Invoke(() => {
                             var announcement = new AnnouncementWindow(announcementMsg);
                             announcement.Show(); // Use Show instead of ShowDialog to prevent blocking
+                        });
+                        break;
+                    case string s when s.StartsWith("notify|"):
+                        string notifyMsg = command.ToLower().Substring("notify|".Length);
+                        SetStatus($"🔔 {notifyMsg}");
+                        Application.Current.Dispatcher.Invoke(() => {
+                            MessageBox.Show(notifyMsg, "LabGuard Notification", MessageBoxButton.OK, MessageBoxImage.Information);
                         });
                         break;
                     case string s when s.StartsWith("file_transfer|"):
@@ -356,32 +369,34 @@ namespace ClientLocker
 
         private async void Login_Click(object sender, RoutedEventArgs e)
         {
-            string id = IdInput.Text;
+            string id = IdInput.Text.Trim();
             string password = PasswordInput.Password;
 
-            // Simplified Admin Login as requested
+            // Admin login — unlimited time, no restrictions
             if (id == "admin" && password == "nopassword")
             {
+                _isAdmin = true;
                 _hook.Unhook();
                 this.Hide();
-                OpenUserDashboard(new StudentData { Id = "System Admin", WeeklyRemaining = 9999, DailyRemaining = 9999 });
+                OpenUserDashboard(new StudentData { Id = "System Admin", StudentId = "admin", WeeklyRemaining = int.MaxValue, DailyRemaining = int.MaxValue });
                 MessageBox.Show("Welcome, Admin!");
             }
             else
             {
+                _isAdmin = false;
                 var student = await _firebase.ValidateStudent(id, password);
                 if (student != null)
                 {
                     if (student.WeeklyRemaining <= 0 || student.DailyRemaining <= 0)
                     {
-                        MessageBox.Show("Your time quota has expired.");
+                        MessageBox.Show("Your time quota has expired. Please contact the administrator.");
                         return;
                     }
                     _currentStudent = student;
                     OpenUserDashboard(student);
                     UnlockPC();
                 }
-                else MessageBox.Show("Invalid ID or Password");
+                else MessageBox.Show("Invalid ID or Password.");
             }
         }
 

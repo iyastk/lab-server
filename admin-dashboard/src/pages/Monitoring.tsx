@@ -1,11 +1,21 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, where, deleteDoc, getDoc } from 'firebase/firestore';
-import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock, Megaphone, Send, FileUp, Shield, Settings, Moon, ChevronRight, ExternalLink, MousePointerClick } from 'lucide-react';
+import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock, Megaphone, Send, FileUp, Shield, Settings, Moon, ChevronRight, ExternalLink, MousePointerClick, RefreshCw, Check } from 'lucide-react';
+import { Station } from '../types';
+
+interface StationCardProps {
+    station: Station;
+    isLive: boolean;
+    isSelected: boolean;
+    onSelect: (id: string) => void;
+    isCommandPending: boolean;
+    sendCommand: (stationId: string, command: string) => Promise<void>;
+}
 
 const StationCard = memo(({
     station, isLive, isSelected, onSelect, isCommandPending, sendCommand
-}) => {
+}: StationCardProps) => {
     // Auto-request screenshot if missing and station is online
     useEffect(() => {
         if (station.status === 'online' && !station.lastScreenshot && !isCommandPending) {
@@ -102,11 +112,26 @@ const StationCard = memo(({
     );
 });
 
+interface CommandSidebarProps {
+    station?: Station;
+    isLive: boolean;
+    onClose: () => void;
+    sendCommand: (stationId: string, command: string) => Promise<void>;
+    toggleLiveView: (stationId: string) => void;
+    setLightbox: (lightbox: any) => void;
+    removeStation: (stationId: string) => Promise<void>;
+    sendAnnouncement: (stationId?: string) => Promise<void>;
+    handleFileTransfer: (stationId?: string) => Promise<void>;
+    wakeStation: (macAddress: string) => Promise<void>;
+    approveTimeRequest: (stationId: string, studentDocId: string, requestType: string) => Promise<void>;
+    rejectTimeRequest: (stationId: string) => Promise<void>;
+}
+
 const CommandSidebar = memo(({
     station, isLive, onClose, sendCommand, toggleLiveView, setLightbox,
     removeStation, sendAnnouncement, handleFileTransfer, wakeStation,
     approveTimeRequest, rejectTimeRequest
-}) => {
+}: CommandSidebarProps) => {
     if (!station) return (
         <div className="glass-panel" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', borderLeft: '2px solid var(--glass)' }}>
             <div style={{ textAlign: 'center', opacity: 0.5 }}>
@@ -137,18 +162,49 @@ const CommandSidebar = memo(({
             </div>
 
             {/* Status & User */}
-            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '15px' }}>
-                <div style={{
-                    background: station.status === 'online' ? 'rgba(34,197,94,0.1)' : 'rgba(148,163,184,0.1)',
-                    padding: '12px', borderRadius: '10px'
-                }}>
-                    <Monitor size={24} color={station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'} />
+            <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    <div style={{
+                        background: station.status === 'online' ? 'rgba(34,197,94,0.1)' : 'rgba(148,163,184,0.1)',
+                        padding: '12px', borderRadius: '10px'
+                    }}>
+                        <Monitor size={24} color={station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{station.currentUser || 'No User'}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: station.status === 'online' ? 'var(--success)' : 'var(--text-muted)' }} />
+                            {station.status === 'online' ? 'Connected' : 'Disconnected'}
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{station.currentUser || 'No User'}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: station.status === 'online' ? 'var(--success)' : 'var(--text-muted)' }} />
-                        {station.status === 'online' ? 'Connected' : 'Disconnected'}
+
+                <div style={{
+                    borderTop: '1px solid rgba(255,255,255,0.05)',
+                    paddingTop: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Command Status</span>
+                        {station.pendingCommand ? (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: 'var(--warning)', fontWeight: 'bold' }}>
+                                <RefreshCw size={12} className="animate-spin" /> Delivering...
+                            </span>
+                        ) : (
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', color: 'var(--success)', fontWeight: 'bold' }}>
+                                <Check size={12} /> Ready
+                            </span>
+                        )}
+                    </div>
+                    {station.pendingCommand && (
+                        <div style={{ fontSize: '0.75rem', padding: '6px 10px', background: 'rgba(245,158,11,0.05)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '6px', color: 'var(--warning)' }}>
+                            Command: <strong>{station.pendingCommand}</strong>
+                        </div>
+                    )}
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        Last Active: {station.lastSeen ? (station.lastSeen.toDate ? station.lastSeen.toDate().toLocaleTimeString() : new Date(station.lastSeen.seconds * 1000).toLocaleTimeString()) : (station.lastScreenshotTime ? new Date(station.lastScreenshotTime.seconds * 1000).toLocaleTimeString() : 'Unknown')}
                     </div>
                 </div>
             </div>
@@ -161,7 +217,7 @@ const CommandSidebar = memo(({
                         <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--warning)' }}>Extra Time Requested</span>
                     </div>
                     <div style={{ display: 'flex', gap: '10px' }}>
-                        <button onClick={() => approveTimeRequest(station.id, station.currentUser, station.timeRequest)}
+                        <button onClick={() => approveTimeRequest(station.id, station.currentUser!, station.timeRequest!)}
                             className="btn" style={{ flex: 1, padding: '8px', background: 'var(--success)', color: 'white' }}>
                             Approve
                         </button>
@@ -201,9 +257,9 @@ const CommandSidebar = memo(({
                             <Camera size={16} /> Snapshot
                         </button>
                         <button className="btn"
-                            style={{ background: station.isInternetBlocked === 'true' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: station.isInternetBlocked === 'true' ? 'var(--success)' : 'var(--danger)' }}
-                            onClick={() => sendCommand(station.id, station.isInternetBlocked === 'true' ? 'INTERNET_ALLOW' : 'INTERNET_BLOCK')}>
-                            {station.isInternetBlocked === 'true' ? <><Globe size={16} /> Allow Net</> : <><GlobeLock size={16} /> Block Net</>}
+                            style={{ background: station.isInternetBlocked ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)', color: station.isInternetBlocked ? 'var(--success)' : 'var(--danger)' }}
+                            onClick={() => sendCommand(station.id, station.isInternetBlocked ? 'INTERNET_ALLOW' : 'INTERNET_BLOCK')}>
+                            {station.isInternetBlocked ? <><Globe size={16} /> Allow Net</> : <><GlobeLock size={16} /> Block Net</>}
                         </button>
                     </div>
                 </div>
@@ -227,7 +283,7 @@ const CommandSidebar = memo(({
                     </div>
                     {station.status !== 'online' && station.macAddress && (
                         <button className="btn" style={{ background: 'rgba(34,197,94,0.1)', color: 'var(--success)', width: '100%' }}
-                            onClick={() => wakeStation(station.macAddress)}>
+                            onClick={() => wakeStation(station.macAddress!)}>
                             <Zap size={16} /> Wake Computer (WoL)
                         </button>
                     )}
@@ -256,7 +312,7 @@ const CommandSidebar = memo(({
                                 alt="Preview"
                                 style={{ width: '100%', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}
                             />
-                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', opacity: 0, transition: 'opacity 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px' }} onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0}>
+                            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', opacity: 0, transition: 'opacity 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px' }} onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = '0'}>
                                 <Maximize2 size={24} color="white" />
                             </div>
                         </div>
@@ -274,28 +330,32 @@ const CommandSidebar = memo(({
         </div>
     );
 });
+
 const Monitoring = () => {
-    const [stations, setStations] = useState([]);
+    const [stations, setStations] = useState<Station[]>([]);
     const [totalStudents, setTotalStudents] = useState(0);
-    const [liveStations, setLiveStations] = useState(new Set());
-    const [lightbox, setLightbox] = useState(null);
+    const [liveStations, setLiveStations] = useState<Set<string>>(new Set());
+    const [lightbox, setLightbox] = useState<{ pcName: string, src: string, id: string } | null>(null);
     const [localServerIp, setLocalServerIp] = useState(window.location.hostname === 'localhost' ? 'localhost' : '');
     const [isUploading, setIsUploading] = useState(false);
     const [securitySettings, setSecuritySettings] = useState({ bannedKeywords: '', blockUninstalls: true });
     const [showSecurityModal, setShowSecurityModal] = useState(false);
     const [isGridView, setIsGridView] = useState(true);
-    const [selectedStationId, setSelectedStationId] = useState(null);
+    const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
     const [showGlobalActions, setShowGlobalActions] = useState(false);
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, 'stations'), (snapshot) => {
-            const stationList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const stationList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Station));
             setStations(stationList);
         });
 
         // Fetch security settings
         getDoc(doc(db, 'settings', 'global')).then(snap => {
-            if (snap.exists()) setSecuritySettings(snap.data());
+            if (snap.exists()) {
+                const data = snap.data() as { bannedKeywords: string; blockUninstalls: boolean };
+                setSecuritySettings(data);
+            }
         });
 
         const studentsUnsubscribe = onSnapshot(collection(db, 'students'), (snapshot) => {
@@ -308,16 +368,16 @@ const Monitoring = () => {
         };
     }, []);
 
-    const stats = {
+    const stats = useMemo(() => ({
         total: stations.length,
         online: stations.filter(s => s.status === 'online').length,
         frozen: stations.filter(s => s.isLocked).length,
-        offline: stations.filter(s => s.status !== 'online').length
-    };
+        offline: stations.filter(s => s.status !== 'online').length,
+    }), [stations]);
 
     const [isCommandPending, setIsCommandPending] = useState(false);
 
-    const sendCommand = useCallback(async (stationId, command) => {
+    const sendCommand = useCallback(async (stationId: string, command: string) => {
         if (isCommandPending) return;
         setIsCommandPending(true);
         try {
@@ -332,7 +392,7 @@ const Monitoring = () => {
         }
     }, [isCommandPending]);
 
-    const removeStation = useCallback(async (stationId) => {
+    const removeStation = useCallback(async (stationId: string) => {
         try {
             await deleteDoc(doc(db, 'stations', stationId));
         } catch (err) {
@@ -340,23 +400,26 @@ const Monitoring = () => {
         }
     }, []);
 
-    const sendAnnouncement = useCallback(async (stationId = null) => {
+    const sendAnnouncement = useCallback(async (stationId?: string) => {
         const msg = window.prompt("Enter announcement message:");
-        if (!msg) return;
+        if (!msg?.trim()) return;
 
+        // Use lowercase prefix — client lowercases before switch matching
         if (stationId) {
-            await sendCommand(stationId, `ANNOUNCEMENT|${msg}`);
+            await sendCommand(stationId, `announcement|${msg}`);
         } else {
             const batch = writeBatch(db);
             stations.forEach(s => {
-                batch.update(doc(db, 'stations', s.id), { pendingCommand: `ANNOUNCEMENT|${msg}`, commandTimestamp: new Date() });
+                batch.update(doc(db, 'stations', s.id), { pendingCommand: `announcement|${msg}`, commandTimestamp: new Date() });
             });
             await batch.commit();
+            alert(`📢 Announcement sent to ${stations.length} station(s).`);
+            return;
         }
-        alert("Announcement sent!");
+        alert("📢 Announcement sent!");
     }, [sendCommand, stations]);
 
-    const handleFileTransfer = useCallback(async (stationId = null) => {
+    const handleFileTransfer = useCallback(async (stationId?: string) => {
         if (!localServerIp) {
             const ip = window.prompt("Enter Local Server IP (e.g., 192.168.1.5):", "localhost");
             if (!ip) return;
@@ -365,8 +428,9 @@ const Monitoring = () => {
 
         const input = document.createElement('input');
         input.type = 'file';
-        input.onchange = async (e) => {
-            const file = e.target.files[0];
+        input.onchange = async (e: Event) => {
+            const target = e.target as HTMLInputElement;
+            const file = target?.files?.[0];
             if (!file) return;
 
             setIsUploading(true);
@@ -402,7 +466,7 @@ const Monitoring = () => {
         input.click();
     }, [localServerIp, sendCommand, stations]);
 
-    const wakeStation = useCallback(async (macAddress) => {
+    const wakeStation = useCallback(async (macAddress: string) => {
         if (!localServerIp) {
             const ip = window.prompt("Enter Local Server IP to send Wake packet:", "localhost");
             if (!ip) return;
@@ -437,7 +501,7 @@ const Monitoring = () => {
         }
     };
 
-    const handleAllCommand = async (command) => {
+    const handleAllCommand = async (command: string) => {
         if (!window.confirm(`Are you sure you want to ${command.toUpperCase()} all stations?`)) return;
         try {
             const batch = writeBatch(db);
@@ -452,7 +516,7 @@ const Monitoring = () => {
         }
     };
 
-    const toggleLiveView = useCallback((stationId) => {
+    const toggleLiveView = useCallback((stationId: string) => {
         setLiveStations(prev => {
             const newSet = new Set(prev);
             if (newSet.has(stationId)) {
@@ -466,7 +530,7 @@ const Monitoring = () => {
         });
     }, [sendCommand]);
 
-    const approveTimeRequest = useCallback(async (stationId, studentDocId, requestType) => {
+    const approveTimeRequest = useCallback(async (stationId: string, studentDocId: string, requestType: string) => {
         const extraMinutes = requestType === 'PENDING_60MIN' ? 60 : 30;
         try {
             // studentDocId is the document ID in Firestore
@@ -503,7 +567,7 @@ const Monitoring = () => {
         } catch (err) { console.error("Approval error:", err); }
     }, []);
 
-    const rejectTimeRequest = useCallback(async (stationId) => {
+    const rejectTimeRequest = useCallback(async (stationId: string) => {
         try {
             await updateDoc(doc(db, 'stations', stationId), {
                 timeRequest: "",
@@ -536,11 +600,11 @@ const Monitoring = () => {
                         src={`data:image/jpeg;base64,${lightbox.src}`}
                         alt="Full Screen"
                         style={{ maxWidth: '95vw', maxHeight: '90vh', borderRadius: '8px', objectFit: 'contain', cursor: 'crosshair' }}
-                        onClick={(e) => {
-                            const rect = e.target.getBoundingClientRect();
+                        onClick={(e: React.MouseEvent<HTMLImageElement>) => {
+                            const rect = (e.target as HTMLImageElement).getBoundingClientRect();
                             const x = Math.round(((e.clientX - rect.left) / rect.width) * 1000);
                             const y = Math.round(((e.clientY - rect.top) / rect.height) * 1000);
-                            sendCommand(lightbox.id, `MOUSE_CLICK|${x}|${y}`);
+                            sendCommand(lightbox!.id, `MOUSE_CLICK|${x}|${y}`);
                         }}
                     />
                 </div>
@@ -587,10 +651,10 @@ const Monitoring = () => {
                     <button className="btn btn-sm" style={{ background: 'var(--success)' }} onClick={() => handleAllCommand('internet_allow')}>
                         <Globe size={14} /> Allow Net
                     </button>
-                    <button className="btn btn-sm" style={{ background: 'var(--primary)' }} onClick={() => sendAnnouncement()}>
+                    <button className="btn btn-sm" style={{ background: 'var(--primary)' }} onClick={() => sendAnnouncement(undefined)}>
                         <Megaphone size={14} /> Broadcast
                     </button>
-                    <button className="btn btn-sm" style={{ background: 'var(--success)' }} onClick={() => handleFileTransfer()} disabled={isUploading}>
+                    <button className="btn btn-sm" style={{ background: 'var(--success)' }} onClick={() => handleFileTransfer(undefined)} disabled={isUploading}>
                         <FileUp size={14} /> {isUploading ? 'Uploading...' : 'Send File'}
                     </button>
                 </div>

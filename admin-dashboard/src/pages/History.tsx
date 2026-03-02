@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../firebase';
 import {
     collection, query, orderBy, limit, onSnapshot, getDocs,
@@ -7,9 +7,11 @@ import {
 import {
     User, Clock, Monitor, Activity, Database, ChevronRight, ChevronDown,
     Calendar, Search, Youtube, Globe, Cpu, X, Sparkles, ShieldAlert,
-    RefreshCw, BarChart2, Server, Cloud, Layers
+    RefreshCw, BarChart2, Server, Cloud, Layers, Zap
 } from 'lucide-react';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+
+import { Station, Student, HistoryLog } from '../types';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const GEMINI_API_KEY = 'AIzaSyCTA4El4GxN79h89s-eGuj5PNfnkhP7FSI';
@@ -17,41 +19,76 @@ const LOCAL_SERVER_URL = 'http://localhost:5000';
 const MAX_CLOUD_SESSIONS = 5; // Auto-offload when exceeding this
 
 // ─── Category Helpers ─────────────────────────────────────────────────────────
-const CATS = {
+interface CategoryStyle {
+    bg: string;
+    color: string;
+}
+
+const CATS: Record<string, CategoryStyle> = {
     YouTube: { bg: 'rgba(239,68,68,0.12)', color: '#ef4444' },
     Search: { bg: 'rgba(251,191,36,0.12)', color: '#fbbf24' },
     'Web Browsing': { bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' },
     'General App': { bg: 'rgba(139,92,246,0.12)', color: '#a78bfa' },
     VIOLATION: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
     App: { bg: 'rgba(34,197,94,0.12)', color: '#4ade80' },
+    Social: { bg: 'rgba(236,72,153,0.12)', color: '#ec4899' },
+    Gaming: { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' },
+    Coding: { bg: 'rgba(16,185,129,0.12)', color: '#10b981' },
+    System: { bg: 'rgba(107,114,128,0.12)', color: '#9ca3af' },
 };
-const catStyle = (cat) => CATS[cat] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' };
-const catIcon = (cat) => {
+
+const catStyle = (cat: string): CategoryStyle => CATS[cat] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' };
+const catIcon = (cat: string) => {
     if (cat === 'YouTube') return <Youtube size={12} />;
     if (cat === 'Search') return <Search size={12} />;
     if (cat === 'Web Browsing') return <Globe size={12} />;
     if (cat === 'VIOLATION') return <ShieldAlert size={12} />;
+    if (cat === 'Gaming') return <Zap size={12} />;
+    if (cat === 'Coding') return <Layers size={12} />;
     return <Cpu size={12} />;
 };
-const parse = (raw = '') => {
+
+const parse = (raw: string = '') => {
     const [cat, ...rest] = raw.split('|');
-    return { cat: cat.trim(), detail: (rest.join('|') || cat).trim() };
+    const category = cat.trim();
+    const detail = (rest.join('|') || category).trim();
+
+    // Auto-categorize based on detail if it's "General App" or "Web Browsing"
+    if (category === 'General App' || category === 'App') {
+        const d = detail.toLowerCase();
+        if (d.includes('code') || d.includes('studio') || d.includes('sublime') || d.includes('python')) return { cat: 'Coding', detail };
+        if (d.includes('discord') || d.includes('facebook') || d.includes('instagram') || d.includes('twitter')) return { cat: 'Social', detail };
+        if (d.includes('steam') || d.includes('game') || d.includes('roblox') || d.includes('minecraft')) return { cat: 'Gaming', detail };
+    }
+
+    return { cat: category, detail };
 };
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
-const toDate = (ts) => typeof ts === 'string' ? new Date(ts) : ts?.toDate?.();
-const fmtTime = (ts) => { const d = toDate(ts); return d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'; };
-const fmtDate = (ts) => { const d = toDate(ts); return d ? d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : '—'; };
-const fmtDur = (sec) => { if (!sec) return '—'; const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m}m ${s}s` : `${s}s`; };
+const toDate = (ts: any): Date | null => {
+    if (!ts) return null;
+    if (ts instanceof Date) return ts;
+    if (typeof ts === 'string') return new Date(ts);
+    if (ts.toDate && typeof ts.toDate === 'function') return ts.toDate();
+    return null;
+};
+const fmtTime = (ts: any) => { const d = toDate(ts); return d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'; };
+const fmtDate = (ts: any) => { const d = toDate(ts); return d ? d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) : '—'; };
+const fmtDur = (sec: number) => { if (!sec) return '—'; const m = Math.floor(sec / 60), s = sec % 60; return m ? `${m}m ${s}s` : `${s}s`; };
 
-// ─── Session grouper (30-min gap = new session) ───────────────────────────────
-function groupSessions(logs) {
+interface Session {
+    logs: HistoryLog[];
+    start: any;
+    end: any;
+}
+
+function groupSessions(logs: HistoryLog[]): Session[] {
     if (!logs.length) return [];
-    const sorted = [...logs].sort((a, b) => (toDate(a.timestamp) || 0) - (toDate(b.timestamp) || 0));
-    const sessions = [];
-    let cur = { logs: [sorted[0]], start: sorted[0].timestamp, end: sorted[0].timestamp };
+    const sorted = [...logs].sort((a, b) => (toDate(a.timestamp)?.getTime() || 0) - (toDate(b.timestamp)?.getTime() || 0));
+    const sessions: Session[] = [];
+    let cur: Session = { logs: [sorted[0]], start: sorted[0].timestamp, end: sorted[0].timestamp };
     for (let i = 1; i < sorted.length; i++) {
-        const gap = ((toDate(sorted[i].timestamp) || 0) - (toDate(sorted[i - 1].timestamp) || 0)) / 60000;
+        const gap = ((toDate(sorted[i].timestamp)?.getTime() || 0) - (toDate(sorted[i - 1].timestamp)?.getTime() || 0)) / 60000;
         if (gap > 30) { sessions.push(cur); cur = { logs: [sorted[i]], start: sorted[i].timestamp, end: sorted[i].timestamp }; }
         else { cur.logs.push(sorted[i]); cur.end = sorted[i].timestamp; }
     }
@@ -59,22 +96,27 @@ function groupSessions(logs) {
     return sessions.reverse(); // newest first
 }
 
-// ─── Category stats ───────────────────────────────────────────────────────────
-function calcStats(logs) {
-    const counts = {};
+interface StatItem {
+    cat: string;
+    count: number;
+    pct: number;
+}
+
+function calcStats(logs: HistoryLog[]): StatItem[] {
+    const counts: Record<string, number> = {};
     logs.forEach(l => { const { cat } = parse(l.activity); counts[cat] = (counts[cat] || 0) + 1; });
     const total = logs.length || 1;
     return Object.entries(counts).map(([cat, count]) => ({ cat, count, pct: Math.round(count / total * 100) })).sort((a, b) => b.count - a.count);
 }
 
 // ─── Gemini Prompt ────────────────────────────────────────────────────────────
-function buildPrompt(student, sessions) {
+function buildPrompt(student: Student, sessions: Session[]) {
     const name = student.name || student.studentId;
     const allLogs = sessions.flatMap(s => s.logs);
     const stats = calcStats(allLogs);
     const topActivities = [...new Set(allLogs.map(l => parse(l.activity).detail))].slice(0, 25).join(', ');
     const sessionLines = sessions.map((s, i) => {
-        const dur = Math.round(((toDate(s.end) || 0) - (toDate(s.start) || 0)) / 60000);
+        const dur = Math.round(((toDate(s.end)?.getTime() || 0) - (toDate(s.start)?.getTime() || 0)) / 60000);
         const cats = [...new Set(s.logs.map(l => parse(l.activity).cat))].join(', ');
         return `  Session ${sessions.length - i}: ${fmtDate(s.start)}, ~${dur}m — ${cats}`;
     }).join('\n');
@@ -100,8 +142,7 @@ ${statLines}
 ${topActivities}`;
 }
 
-// ─── Offload old sessions to local server ─────────────────────────────────────
-async function offloadOldSessions(studentId, allCloudDocs, sessionsToKeep) {
+async function offloadOldSessions(studentId: string, allCloudDocs: HistoryLog[], sessionsToKeep: Session[]) {
     // sessionsToKeep = last MAX_CLOUD_SESSIONS sessions (already sorted newest-first)
     const keepIds = new Set(sessionsToKeep.flatMap(s => s.logs.map(l => l.id)));
     const toOffload = allCloudDocs.filter(d => !keepIds.has(d.id));
@@ -122,7 +163,9 @@ async function offloadOldSessions(studentId, allCloudDocs, sessionsToKeep) {
 
         // Delete from Firestore
         const batch = writeBatch(db);
-        toOffload.forEach(d => batch.delete(doc(db, 'history', d.id)));
+        toOffload.forEach(d => {
+            if (d.id) batch.delete(doc(db, 'history', d.id));
+        });
         await batch.commit();
         console.log(`[AutoOffload] Moved ${toOffload.length} logs for ${studentId} to local server.`);
     } catch {
@@ -130,8 +173,11 @@ async function offloadOldSessions(studentId, allCloudDocs, sessionsToKeep) {
     }
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-const LogRow = ({ log }) => {
+interface LogRowProps {
+    log: HistoryLog;
+}
+
+const LogRow = ({ log }: LogRowProps) => {
     const { cat, detail } = parse(log.activity);
     const cs = catStyle(cat);
     return (
@@ -147,7 +193,13 @@ const LogRow = ({ log }) => {
     );
 };
 
-const CategoryBar = ({ cat, count, pct }) => {
+interface CategoryBarProps {
+    cat: string;
+    count: number;
+    pct: number;
+}
+
+const CategoryBar = ({ cat, count, pct }: CategoryBarProps) => {
     const cs = catStyle(cat);
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -163,20 +215,19 @@ const CategoryBar = ({ cat, count, pct }) => {
     );
 };
 
-const RenderReport = ({ text }) => text.split('\n').map((line, i) => (
+const RenderReport = ({ text }: { text: string }) => text.split('\n').map((line, i) => (
     <p key={i} style={{ margin: '4px 0', fontSize: '0.88rem', lineHeight: '1.7' }}
         dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
 ));
 
-// ─── Main Component ───────────────────────────────────────────────────────────
 const History = () => {
-    const [students, setStudents] = useState([]);
-    const [selected, setSelected] = useState(null);
-    const [cloudLogs, setCloudLogs] = useState([]);
-    const [cloudSessions, setCloudSessions] = useState([]); // capped at 5
-    const [localLogs, setLocalLogs] = useState([]);
-    const [localSessions, setLocalSessions] = useState([]);
-    const [activeSession, setActiveSession] = useState(null);
+    const [students, setStudents] = useState<Student[]>([]);
+    const [selected, setSelected] = useState<Student | null>(null);
+    const [cloudLogs, setCloudLogs] = useState<HistoryLog[]>([]);
+    const [cloudSessions, setCloudSessions] = useState<Session[]>([]); // capped at 5
+    const [localLogs, setLocalLogs] = useState<HistoryLog[]>([]);
+    const [localSessions, setLocalSessions] = useState<Session[]>([]);
+    const [activeSession, setActiveSession] = useState<Session | null>(null);
     const [filter, setFilter] = useState('All');
     const [loadingCloud, setLoadingCloud] = useState(false);
     const [loadingLocal, setLoadingLocal] = useState(false);
@@ -187,15 +238,15 @@ const History = () => {
     const [aiReport, setAiReport] = useState('');
     const [aiLoading, setAiLoading] = useState(false);
     const [showReport, setShowReport] = useState(false);
-    const [aiSource, setAiSource] = useState('cloud'); // 'cloud' | 'all'
+    const [aiSource, setAiSource] = useState<'cloud' | 'all'>('cloud'); // 'cloud' | 'all'
 
-    const categories = ['All', 'YouTube', 'Search', 'Web Browsing', 'General App', 'VIOLATION'];
-    const allDocsRef = useRef([]); // keep raw cloud docs for offload
+    const categories = ['All', 'YouTube', 'Search', 'Web Browsing', 'General App', 'Coding', 'Social', 'Gaming', 'VIOLATION'];
+    const allDocsRef = useRef<HistoryLog[]>([]); // keep raw cloud docs for offload
 
     // Load students
     useEffect(() => {
         const q = query(collection(db, 'students'), orderBy('studentId', 'asc'));
-        const unsub = onSnapshot(q, snap => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsub = onSnapshot(q, snap => setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() } as Student))));
         return () => unsub();
     }, []);
 
@@ -216,7 +267,7 @@ const History = () => {
             limit(500)
         );
         const unsub = onSnapshot(q, async (snap) => {
-            const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as HistoryLog));
             allDocsRef.current = docs;
 
             const allSessions = groupSessions(docs);
@@ -252,26 +303,28 @@ const History = () => {
     }, [selected]);
 
     // Combined data for full report
-    const allLogs = [...cloudLogs, ...localLogs];
-    const allSessions = groupSessions(allLogs);
-    const globalStats = calcStats(cloudLogs); // current cloud stats for bar chart
+    const allLogs = useMemo(() => [...cloudLogs, ...localLogs], [cloudLogs, localLogs]);
+    const allSessions = useMemo(() => groupSessions(allLogs), [allLogs]);
+    const globalStats = useMemo(() => calcStats(cloudLogs), [cloudLogs]);
 
     // Filtered logs for open session
-    const sessionLogs = activeSession
-        ? activeSession.logs.filter(l => filter === 'All' || parse(l.activity).cat === filter)
-        : [];
+    const sessionLogs = useMemo(() =>
+        activeSession
+            ? activeSession.logs.filter(l => filter === 'All' || parse(l.activity).cat === filter)
+            : [],
+        [activeSession, filter]);
 
     // Generate AI report
-    const generateAI = async (source = aiSource) => {
+    const generateAI = async (source: 'cloud' | 'all' = aiSource) => {
         const sessions = source === 'all' ? allSessions : cloudSessions;
-        if (!sessions.length) return;
+        if (!sessions.length || !selected) return;
         setAiLoading(true); setShowReport(true); setAiReport(''); setAiSource(source);
         try {
             const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
             const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
             const result = await model.generateContent(buildPrompt(selected, sessions.slice(0, 15)));
             setAiReport(result.response.text());
-        } catch (e) {
+        } catch (e: any) {
             const stats = calcStats(sessions.flatMap(s => s.logs));
             setAiReport(`**Usage Summary**\n${selected.name || selected.studentId} has ${sessions.length} recorded sessions with ${sessions.flatMap(s => s.logs).length} total activities.\n\n**Activity Breakdown**\n${stats.map(s => `• ${s.cat}: ${s.pct}%`).join('\n')}\n\n**Error:** ${e.message}`);
         } finally { setAiLoading(false); }
@@ -289,7 +342,7 @@ const History = () => {
             snapshot.docs.forEach(d => batch.delete(d.ref));
             await batch.commit();
             alert(`Archived ${logs.length} logs to local server.`);
-        } catch (e) { alert('Error: ' + e.message); }
+        } catch (e: any) { alert('Error: ' + e.message); }
         finally { setIsSyncing(false); }
     };
 
@@ -298,7 +351,7 @@ const History = () => {
         s.name?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const renderSessions = (sessions, label) => (
+    const renderSessions = (sessions: Session[], label: 'cloud' | 'local') => (
         <>
             {sessions.length > 0 && (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '-6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -309,7 +362,7 @@ const History = () => {
             )}
             {sessions.map((session, idx) => {
                 const isOpen = activeSession === session;
-                const dur = Math.round(((toDate(session.end) || 0) - (toDate(session.start) || 0)) / 1000) + 30;
+                const dur = Math.round(((toDate(session.end)?.getTime() || 0) - (toDate(session.start)?.getTime() || 0)) / 1000) + 30;
                 const sStats = calcStats(session.logs);
                 return (
                     <div key={idx} className="glass-panel" style={{ overflow: 'hidden', borderLeft: label === 'cloud' ? '3px solid rgba(79,70,229,0.3)' : '3px solid rgba(34,197,94,0.3)' }}>

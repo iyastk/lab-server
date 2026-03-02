@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Threading;
 
 namespace ClientLocker
@@ -35,7 +36,21 @@ namespace ClientLocker
 
         private void Timer_Tick(object? sender, EventArgs e)
         {
+            if (_student.Id == "System Admin" || _student.StudentId == "admin")
+            {
+                // Unlimited timing for admins
+                DailyText.Text = "Unlimited";
+                WeeklyText.Text = "Unlimited";
+                return;
+            }
+            
             UpdateTimeDisplays();
+        }
+
+        private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+                this.DragMove();
         }
 
         private void UpdateTimeDisplays()

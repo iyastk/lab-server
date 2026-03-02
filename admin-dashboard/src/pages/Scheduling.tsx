@@ -13,8 +13,16 @@ const DAYS_OF_WEEK = [
     { value: 6, label: 'Sat' },
 ];
 
+interface Schedule {
+    id: string;
+    type: 'shutdown' | 'restart';
+    time: string;
+    days: string;
+    enabled: boolean;
+}
+
 const Scheduling = () => {
-    const [schedules, setSchedules] = useState([]);
+    const [schedules, setSchedules] = useState<Schedule[]>([]);
     const [newType, setNewType] = useState('shutdown');
     const [newTime, setNewTime] = useState('22:00');
     const [newDays, setNewDays] = useState('1,2,3,4,5'); // Mon-Fri
@@ -64,7 +72,7 @@ const Scheduling = () => {
         }
     };
 
-    const handleAdd = async (e) => {
+    const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
 
         if (!newDays) {
@@ -90,7 +98,7 @@ const Scheduling = () => {
         }
     };
 
-    const handleDayToggle = (dayValue) => {
+    const handleDayToggle = (dayValue: number) => {
         let daysArray = newDays ? newDays.split(',').map(Number) : [];
         if (daysArray.includes(dayValue)) {
             daysArray = daysArray.filter(d => d !== dayValue);
@@ -104,7 +112,7 @@ const Scheduling = () => {
     const currentDaysArray = newDays ? newDays.split(',').map(Number) : [];
 
 
-    const handleDelete = async (id) => {
+    const handleDelete = async (id: string) => {
         if (!window.confirm("Delete this schedule?")) return;
         try {
             const resp = await fetch(`${LOCAL_SERVER_URL}/api/schedules/${id}`, { method: 'DELETE' });
@@ -114,7 +122,7 @@ const Scheduling = () => {
         }
     };
 
-    const getDayLabels = (days) => {
+    const getDayLabels = (days: string) => {
         if (days === 'all' || !days) return 'Every Day';
         const labels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         return days.split(',').map(d => labels[parseInt(d)]).join(', ');
@@ -244,7 +252,7 @@ const Scheduling = () => {
                             </tr>
                         ))}
                         {schedules.length === 0 && (
-                            <tr><td colSpan="5" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No automation schedules active.</td></tr>
+                            <tr><td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No automation schedules active.</td></tr>
                         )}
                     </tbody>
                 </table>

@@ -4,12 +4,13 @@
         Title="LabGuard Dashboard" 
         Height="600" Width="300"
         WindowStyle="None" 
-        ResizeMode="NoResize"
+        ResizeMode="CanResizeWithGrip"
         AllowsTransparency="True"
         Background="Transparent"
         Topmost="True"
         Left="10" Top="10"
-        ShowInTaskbar="False">
+        ShowInTaskbar="False"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
     
     <Border Background="#CC0F172A" CornerRadius="15" BorderBrush="#334155" BorderThickness="1" Margin="5">
         <Grid Margin="20">
