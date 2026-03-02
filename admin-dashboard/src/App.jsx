@@ -35,6 +35,10 @@ function App() {
                         } />
                     </Route>
                 </Routes>
+                {/* Deployment Sync Indicator */}
+                <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.5, pointerEvents: 'none', zIndex: 10000 }}>
+                    LabGuard Admin v1.9.1 (UI Redesign)
+                </div>
             </Suspense>
         </Router>
     );

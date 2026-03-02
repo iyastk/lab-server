@@ -4,77 +4,93 @@ import { collection, onSnapshot, doc, updateDoc, writeBatch, getDocs, query, whe
 import { Monitor, Power, Lock, Unlock, Camera, Eye, Zap, Video, VideoOff, X, RotateCcw, Clock, Maximize2, Trash2, Globe, GlobeLock, Megaphone, Send, FileUp, Shield, Settings, Moon, ChevronRight, ExternalLink, MousePointerClick } from 'lucide-react';
 
 const StationCard = memo(({
-    station, isLive, isSelected, onSelect, isCommandPending
-}) => (
-    <div
-        onClick={() => onSelect(station.id)}
-        className="glass-panel"
-        style={{
-            padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px',
-            cursor: 'pointer', transition: 'all 0.2s',
-            border: isSelected ? '2px solid var(--primary)' : '1px solid var(--glass)',
-            boxShadow: isSelected ? '0 0 15px rgba(79,70,229,0.3)' : 'none',
-            background: isSelected ? 'rgba(79,70,229,0.05)' : 'rgba(255,255,255,0.02)',
-            transform: isSelected ? 'scale(1.02)' : 'scale(1)',
-            position: 'relative',
-            ...(isLive ? { borderColor: 'rgba(239,68,68,0.5)', boxShadow: '0 0 10px rgba(239,68,68,0.2)' } : {})
-        }}
-    >
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', overflow: 'hidden' }}>
-                <Monitor size={14} color={station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'} />
-                <div style={{ overflow: 'hidden' }}>
-                    <h3 style={{ margin: 0, fontSize: '0.85rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{station.pcName || station.id}</h3>
+    station, isLive, isSelected, onSelect, isCommandPending, sendCommand
+}) => {
+    // Auto-request screenshot if missing and station is online
+    useEffect(() => {
+        if (station.status === 'online' && !station.lastScreenshot && !isCommandPending) {
+            sendCommand(station.id, 'screenshot');
+        }
+    }, [station.id, station.status, station.lastScreenshot, isCommandPending, sendCommand]);
+
+    return (
+        <div
+            onClick={() => onSelect(station.id)}
+            className="glass-panel"
+            style={{
+                padding: '10px', display: 'flex', flexDirection: 'column', gap: '6px',
+                cursor: 'pointer', transition: 'all 0.2s',
+                border: isSelected ? '2px solid var(--primary)' : '1px solid var(--glass)',
+                boxShadow: isSelected ? '0 0 15px rgba(79,70,229,0.3)' : 'none',
+                background: isSelected ? 'rgba(79,70,229,0.08)' : 'rgba(255,255,255,0.02)',
+                transform: isSelected ? 'scale(1.02)' : 'scale(1)',
+                position: 'relative',
+                zIndex: isSelected ? 10 : 1,
+                minHeight: '180px',
+                ...(isLive ? { borderColor: 'rgba(239,68,68,0.5)', boxShadow: '0 0 10px rgba(239,68,68,0.2)' } : {})
+            }}
+        >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', overflow: 'hidden' }}>
+                    <Monitor size={14} color={station.status === 'online' ? 'var(--success)' : 'var(--text-muted)'} />
+                    <div style={{ overflow: 'hidden' }}>
+                        <h3 style={{ margin: 0, fontSize: '0.8rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontWeight: isSelected ? 'bold' : 'normal' }}>{station.pcName || station.id}</h3>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    {isLive && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--danger)', animation: 'pulse 1s infinite' }} />}
+                    <span className={`status-indicator ${station.status === 'online' ? 'status-online' : 'status-offline'}`} style={{ width: '8px', height: '8px' }}></span>
                 </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                {isLive && <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--danger)', animation: 'pulse 1s infinite' }} />}
-                <span className={`status-indicator ${station.status === 'online' ? 'status-online' : 'status-offline'}`} style={{ width: '8px', height: '8px' }}></span>
-            </div>
-        </div>
 
-        {/* Screenshot Preview */}
-        <div style={{
-            aspectRatio: '16/9', background: '#000', borderRadius: '6px', overflow: 'hidden',
-            border: '1px solid rgba(255,255,255,0.05)', position: 'relative'
-        }}>
-            {station.lastScreenshot ? (
-                <img
-                    src={`data:image/jpeg;base64,${station.lastScreenshot}`}
-                    alt="Screen"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: station.status === 'online' ? 1 : 0.4 }}
-                />
-            ) : (
-                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.1)' }}>
-                    <Monitor size={32} />
+            {/* Screenshot Preview */}
+            <div style={{
+                flex: 1, background: '#000', borderRadius: '6px', overflow: 'hidden',
+                border: '1px solid rgba(255,255,255,0.05)', position: 'relative',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+                {station.lastScreenshot ? (
+                    <img
+                        src={`data:image/jpeg;base64,${station.lastScreenshot}`}
+                        alt="Screen"
+                        style={{ width: '100%', height: '100%', objectFit: 'contain', opacity: station.status === 'online' ? 1 : 0.4 }}
+                    />
+                ) : (
+                    <div style={{ textAlign: 'center', opacity: 0.2 }}>
+                        <Monitor size={32} />
+                        {station.status === 'online' && <div style={{ fontSize: '0.6rem', marginTop: '4px' }}>Requesting...</div>}
+                    </div>
+                )}
+
+                {/* Overlay Info */}
+                <div style={{
+                    position: 'absolute', bottom: 0, left: 0, right: 0,
+                    padding: '6px 8px', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
+                    fontSize: '0.65rem', color: 'white', display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
+                    <span style={{ maxWidth: '70%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {station.currentUser || 'Available'}
+                    </span>
+                    {station.isLocked && <Lock size={10} color="var(--warning)" />}
+                </div>
+            </div>
+
+            {/* Time Request Badge */}
+            {station.timeRequest && (
+                <div style={{
+                    position: 'absolute', top: '-4px', right: '-4px',
+                    background: 'var(--warning)', color: '#000',
+                    padding: '1px 5px', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 'bold',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.2)', zIndex: 20
+                }}>
+                    TIME
                 </div>
             )}
-
-            {/* Overlay Info */}
-            <div style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                padding: '6px 8px', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))',
-                fontSize: '0.7rem', color: 'white', display: 'flex', justifyContent: 'space-between'
-            }}>
-                <span>{station.currentUser || 'Available'}</span>
-                {station.isLocked && <Lock size={10} color="var(--warning)" />}
-            </div>
         </div>
-
-        {/* Time Request Badge */}
-        {station.timeRequest && (
-            <div style={{
-                position: 'absolute', top: '-5px', right: '-5px',
-                background: 'var(--warning)', color: '#000',
-                padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold',
-                boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
-            }}>
-                TIME!
-            </div>
-        )}
-    </div>
-), (prev, next) => {
+    );
+}, (prev, next) => {
     return (
         prev.isSelected === next.isSelected &&
         prev.isLive === next.isLive &&
@@ -269,6 +285,7 @@ const Monitoring = () => {
     const [showSecurityModal, setShowSecurityModal] = useState(false);
     const [isGridView, setIsGridView] = useState(true);
     const [selectedStationId, setSelectedStationId] = useState(null);
+    const [showGlobalActions, setShowGlobalActions] = useState(false);
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, 'stations'), (snapshot) => {
@@ -529,57 +546,67 @@ const Monitoring = () => {
                 </div>
             )}
 
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
+            {/* Header - Compact */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '15px' }}>
                 <div>
-                    <h1>Live Monitoring</h1>
-                    <p style={{ color: 'var(--text-muted)' }}>{stations.length} stations · {stats.online} online</p>
+                    <h1 style={{ fontSize: '1.5rem', marginBottom: '4px' }}>Live Monitoring</h1>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{stations.length} stations · {stats.online} online</p>
                 </div>
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                    <button className="btn btn-primary" style={{ background: 'var(--success)' }} onClick={() => handleAllCommand('unlock')}>
-                        <Zap size={18} /> Open Lab
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="btn" style={{ background: 'rgba(255,255,255,0.05)' }} onClick={() => setShowGlobalActions(!showGlobalActions)}>
+                        <Settings size={18} /> {showGlobalActions ? 'Hide Global Tools' : 'Global Lab Tools'}
                     </button>
-                    <button className="btn btn-primary" style={{ background: 'var(--warning)', color: '#000' }} onClick={() => handleAllCommand('restart')}>
-                        <RotateCcw size={18} /> Restart All
-                    </button>
-                    <button className="btn btn-primary" style={{ background: 'var(--danger)' }} onClick={() => handleAllCommand('shutdown')}>
-                        <Power size={18} /> Shutdown All
-                    </button>
-                    <button className="btn btn-primary" onClick={() => handleAllCommand('lock')}>
-                        <Lock size={18} /> Freeze All
-                    </button>
-                    <button className="btn btn-primary" style={{ background: 'var(--danger)' }} onClick={() => handleAllCommand('internet_block')}>
-                        <GlobeLock size={18} /> Block Net
-                    </button>
-                    <button className="btn btn-primary" style={{ background: 'var(--success)' }} onClick={() => handleAllCommand('internet_allow')}>
-                        <Globe size={18} /> Allow Net
-                    </button>
-                    <button className="btn btn-primary" style={{ background: 'var(--primary)' }} onClick={() => sendAnnouncement()}>
-                        <Megaphone size={18} /> Broadcast
-                    </button>
-                    <button className="btn btn-primary" style={{ background: 'var(--success)' }} onClick={() => handleFileTransfer()} disabled={isUploading}>
-                        <FileUp size={18} /> {isUploading ? 'Uploading...' : 'Send File'}
-                    </button>
-                    <button className="btn btn-primary" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setShowSecurityModal(true)}>
+                    <button className="btn" style={{ background: 'rgba(255,255,255,0.05)' }} onClick={() => setShowSecurityModal(true)}>
                         <Shield size={18} /> Security
                     </button>
-                    <button className="btn btn-primary" style={{ background: 'rgba(255,255,255,0.1)' }} onClick={() => setIsGridView(!isGridView)}>
-                        {isGridView ? <Monitor size={18} /> : <Zap size={18} />} {isGridView ? 'List View' : 'Grid View'}
+                    <button className="btn" style={{ background: 'rgba(255,255,255,0.05)' }} onClick={() => setIsGridView(!isGridView)}>
+                        {isGridView ? <Monitor size={18} /> : <Zap size={18} />}
                     </button>
                 </div>
             </div>
 
-            {/* Stats Row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '15px' }}>
+            {/* Global Actions - Collapsible */}
+            {showGlobalActions && (
+                <div className="glass-panel animate-fade-in" style={{ padding: '15px', display: 'flex', gap: '8px', flexWrap: 'wrap', background: 'rgba(255,255,255,0.02)' }}>
+                    <button className="btn btn-sm" style={{ background: 'var(--success)' }} onClick={() => handleAllCommand('unlock')}>
+                        <Zap size={14} /> Open Lab
+                    </button>
+                    <button className="btn btn-sm" style={{ background: 'var(--warning)', color: '#000' }} onClick={() => handleAllCommand('restart')}>
+                        <RotateCcw size={14} /> Restart All
+                    </button>
+                    <button className="btn btn-sm" style={{ background: 'var(--danger)' }} onClick={() => handleAllCommand('shutdown')}>
+                        <Power size={14} /> Shutdown All
+                    </button>
+                    <button className="btn btn-sm" onClick={() => handleAllCommand('lock')}>
+                        <Lock size={14} /> Freeze All
+                    </button>
+                    <button className="btn btn-sm" style={{ background: 'var(--danger)' }} onClick={() => handleAllCommand('internet_block')}>
+                        <GlobeLock size={14} /> Block Net
+                    </button>
+                    <button className="btn btn-sm" style={{ background: 'var(--success)' }} onClick={() => handleAllCommand('internet_allow')}>
+                        <Globe size={14} /> Allow Net
+                    </button>
+                    <button className="btn btn-sm" style={{ background: 'var(--primary)' }} onClick={() => sendAnnouncement()}>
+                        <Megaphone size={14} /> Broadcast
+                    </button>
+                    <button className="btn btn-sm" style={{ background: 'var(--success)' }} onClick={() => handleFileTransfer()} disabled={isUploading}>
+                        <FileUp size={14} /> {isUploading ? 'Uploading...' : 'Send File'}
+                    </button>
+                </div>
+            )}
+
+            {/* Stats Row - Smaller */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
                 {[
                     { label: 'Total Students', value: totalStudents, color: 'var(--primary)' },
                     { label: 'Online PCs', value: stats.online, color: 'var(--success)' },
                     { label: 'Frozen', value: stats.frozen, color: 'var(--warning)' },
                     { label: 'Offline', value: stats.offline, color: 'var(--text-muted)' },
                 ].map(s => (
-                    <div key={s.label} className="glass-panel" style={{ padding: '15px', textAlign: 'center', borderLeft: `3px solid ${s.color}` }}>
-                        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.75rem' }}>{s.label}</p>
-                        <h2 style={{ margin: '5px 0 0', color: s.color }}>{s.value}</h2>
+                    <div key={s.label} className="glass-panel" style={{ padding: '10px', textAlign: 'center', borderLeft: `3px solid ${s.color}` }}>
+                        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.7rem' }}>{s.label}</p>
+                        <h3 style={{ margin: '2px 0 0', color: s.color, fontSize: '1.2rem' }}>{s.value}</h3>
                     </div>
                 ))}
             </div>
@@ -595,6 +622,7 @@ const Monitoring = () => {
                             isSelected={selectedStationId === station.id}
                             onSelect={setSelectedStationId}
                             isCommandPending={isCommandPending}
+                            sendCommand={sendCommand}
                         />
                     ))}
                 </div>
