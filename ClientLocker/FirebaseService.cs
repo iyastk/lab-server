@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.IO;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 
 namespace ClientLocker
 {
@@ -21,8 +22,8 @@ namespace ClientLocker
 
     public class FirebaseService
     {
-        private const string ProjectId = "lab-server-f6d09";
-        private const string BaseUrl = "https://firestore.googleapis.com/v1/projects/" + ProjectId + "/databases/(default)/documents/";
+        // Firebase URL is read from labguard.config.json at runtime
+        private static string BaseUrl => LabGuardConfig.FirebaseBaseUrl;
         
         // Use a static HttpClient to prevent socket exhaustion
         private static readonly HttpClient _http = new HttpClient();
@@ -262,6 +263,89 @@ namespace ClientLocker
             var body = new { fields = new { pendingCommand = new { stringValue = "" } } };
             var content = new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json");
             await _http.PatchAsync(BaseUrl + "stations/" + pcName + "?updateMask.fieldPaths=pendingCommand", content);
+        }
+
+        // --- Wake on LAN Proxy ---
+        
+        private System.Timers.Timer? _wolTimer;
+        public void StartWOLListener()
+        {
+            if (_wolTimer == null)
+            {
+                _wolTimer = new System.Timers.Timer(10000); // Check every 10 seconds
+                _wolTimer.Elapsed += async (s, e) => await CheckForWOLRequests();
+            }
+            _wolTimer.Start();
+        }
+
+        public void StopWOLListener()
+        {
+            _wolTimer?.Stop();
+        }
+
+        private async Task CheckForWOLRequests()
+        {
+            try
+            {
+                var response = await _http.GetAsync(BaseUrl + "wol_requests");
+                if (!response.IsSuccessStatusCode) return;
+
+                var content = await response.Content.ReadAsStringAsync();
+                var data = JObject.Parse(content);
+                var documents = data["documents"];
+                if (documents == null) return;
+
+                foreach (var doc in documents)
+                {
+                    var docId = doc["name"].ToString().Split('/').Last();
+                    var fields = doc["fields"];
+                    string status = fields?["status"]?["stringValue"]?.ToString() ?? "";
+                    
+                    if (status == "pending")
+                    {
+                        string targetMac = fields?["targetMac"]?["stringValue"]?.ToString() ?? "";
+                        if (!string.IsNullOrEmpty(targetMac))
+                        {
+                            SendWOLPacket(targetMac);
+                            
+                            // Mark as processed (optimistic concurrency - if multiple clients do this it's fine)
+                            var body = new { fields = new { status = new { stringValue = "processed" } } };
+                            var patchContent = new StringContent(JsonConvert.SerializeObject(body), Encoding.UTF8, "application/json");
+                            await _http.PatchAsync(BaseUrl + "wol_requests/" + docId + "?updateMask.fieldPaths=status", patchContent);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void SendWOLPacket(string macAddress)
+        {
+            try
+            {
+                string cleanMac = macAddress.Replace(":", "").Replace("-", "");
+                if (cleanMac.Length != 12) return;
+
+                byte[] macBytes = Enumerable.Range(0, cleanMac.Length)
+                                            .Where(x => x % 2 == 0)
+                                            .Select(x => Convert.ToByte(cleanMac.Substring(x, 2), 16))
+                                            .ToArray();
+
+                byte[] packet = new byte[102];
+                for (int i = 0; i < 6; i++) packet[i] = 0xFF;
+                for (int i = 1; i <= 16; i++)
+                    Buffer.BlockCopy(macBytes, 0, packet, i * 6, 6);
+
+                using (UdpClient client = new UdpClient())
+                {
+                    client.Connect(System.Net.IPAddress.Broadcast, 9);
+                    client.Send(packet, packet.Length);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Local WOL Error: " + ex.Message);
+            }
         }
 
         private System.Timers.Timer? _liveTimer;

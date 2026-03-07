@@ -9,6 +9,7 @@ const schedule = require('node-schedule');
 const fs = require('fs');
 const os = require('os');
 const dgram = require('dgram');
+const localtunnel = require('localtunnel');
 
 const app = express();
 const PORT = 5000;
@@ -322,7 +323,7 @@ app.get('/api/stats', (req, res) => {
     });
 });
 
-app.post('/api/wake', (req, res) => {
+app.post('/api/wake', async (req, res) => {
     const { macAddress } = req.body;
     if (!macAddress) return res.status(400).json({ error: "MAC Address is required" });
 
@@ -330,28 +331,45 @@ app.post('/api/wake', (req, res) => {
         const cleanMac = macAddress.replace(/:/g, '').replace(/-/g, '');
         if (cleanMac.length !== 12) throw new Error("Invalid MAC Address format. Use 00:11:22:33:44:55");
 
-        const macBuf = Buffer.from(cleanMac, 'hex');
-        const packet = Buffer.alloc(102).fill(0xff, 0, 6);
-        for (let i = 0; i < 16; i++) {
-            macBuf.copy(packet, 6 + i * 6);
-        }
+        // 1. Direct UDP Broadcast (Best Effort for same subnet)
+        try {
+            const macBuf = Buffer.from(cleanMac, 'hex');
+            const packet = Buffer.alloc(102).fill(0xff, 0, 6);
+            for (let i = 0; i < 16; i++) {
+                macBuf.copy(packet, 6 + i * 6);
+            }
 
-        const client = dgram.createSocket('udp4');
-        client.on('error', (err) => {
-            console.error("WoL socket error:", err);
-            client.close();
-        });
-
-        client.bind(() => {
-            client.setBroadcast(true);
-            client.send(packet, 0, packet.length, 9, '255.255.255.255', (err) => {
-                if (err) console.error("WoL send error:", err);
+            const client = dgram.createSocket('udp4');
+            client.on('error', (err) => {
+                console.error("WoL socket error:", err);
                 client.close();
             });
-        });
 
-        console.log(`WoL Magic Packet sent to ${macAddress}`);
-        res.json({ success: true, message: `Magic Packet sent to ${macAddress}` });
+            client.bind(() => {
+                client.setBroadcast(true);
+                client.send(packet, 0, packet.length, 9, '255.255.255.255', (err) => {
+                    if (err) console.error("WoL send error:", err);
+                    client.close();
+                });
+            });
+            console.log(`Direct WoL Magic Packet sent to ${macAddress}`);
+        } catch (localErr) {
+            console.error("Local WoL failed:", localErr.message);
+        }
+
+        // 2. Proxy via Firebase for Subnet crossing (School networks)
+        const requestBody = {
+            fields: {
+                targetMac: { stringValue: macAddress },
+                timestamp: { timestampValue: new Date().toISOString() },
+                status: { stringValue: 'pending' }
+            }
+        };
+
+        await axios.post(`${FIREBASE_BASE_URL}wol_requests`, requestBody);
+        console.log(`WOL proxy request sent to Firebase for ${macAddress}`);
+
+        res.json({ success: true, message: `Wake signal sent directly and queued for peer proxying for ${macAddress}` });
     } catch (err) {
         console.error("WoL Error:", err.message);
         res.status(500).json({ error: err.message });
@@ -433,15 +451,29 @@ const registerServer = async () => {
             if (localIp !== '127.0.0.1') break;
         }
 
+        let addressToRegister = `http://${localIp}:${PORT}`;
+
+        try {
+            const tunnel = await localtunnel({ port: PORT });
+            addressToRegister = tunnel.url;
+            console.log(`Tunnel created successfully: ${tunnel.url}`);
+
+            tunnel.on('close', () => {
+                console.log('Tunnel closed');
+            });
+        } catch (tunnelErr) {
+            console.error('Failed to create localtunnel, falling back to local IP:', tunnelErr.message);
+        }
+
         const body = {
             fields: {
-                serverAddress: { stringValue: `http://${localIp}:${PORT}` },
+                serverAddress: { stringValue: addressToRegister },
                 lastUpdated: { timestampValue: new Date().toISOString() }
             }
         };
 
         await axios.patch(`${FIREBASE_BASE_URL}settings/network?updateMask.fieldPaths=serverAddress&updateMask.fieldPaths=lastUpdated`, body);
-        console.log(`Server registered in Firebase with IP: ${localIp}`);
+        console.log(`Server registered in Firebase with Address: ${addressToRegister}`);
     } catch (err) {
         console.error("Server registration error:", err.message);
     }

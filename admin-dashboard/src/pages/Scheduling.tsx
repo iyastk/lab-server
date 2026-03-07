@@ -29,13 +29,32 @@ const Scheduling = () => {
     const [loading, setLoading] = useState(false);
     const [serverUnreachable, setServerUnreachable] = useState(false);
     const [blockUninstalls, setBlockUninstalls] = useState(true);
-
-    const LOCAL_SERVER_URL = 'http://localhost:5000';
+    const [localServerUrl, setLocalServerUrl] = useState<string>('http://localhost:5000');
 
     useEffect(() => {
-        fetchSchedules();
-        fetchSecuritySettings();
+        const init = async () => {
+            await fetchSecuritySettings();
+            await fetchServerUrl();
+        };
+        init();
     }, []);
+
+    const fetchServerUrl = async () => {
+        try {
+            const settingsRef = doc(db, 'settings', 'network');
+            const settingsDoc = await getDoc(settingsRef);
+            if (settingsDoc.exists() && settingsDoc.data().serverAddress) {
+                const url = settingsDoc.data().serverAddress;
+                setLocalServerUrl(url);
+                fetchSchedules(url);
+            } else {
+                fetchSchedules(localServerUrl); // fallback
+            }
+        } catch (err) {
+            console.error("Error fetching network settings:", err);
+            fetchSchedules(localServerUrl);
+        }
+    };
 
     const fetchSecuritySettings = async () => {
         try {
@@ -60,9 +79,9 @@ const Scheduling = () => {
         }
     };
 
-    const fetchSchedules = async () => {
+    const fetchSchedules = async (url: string = localServerUrl) => {
         try {
-            const resp = await fetch(`${LOCAL_SERVER_URL}/api/schedules`);
+            const resp = await fetch(`${url}/api/schedules`);
             if (resp.ok) {
                 setSchedules(await resp.json());
                 setServerUnreachable(false);
@@ -82,7 +101,7 @@ const Scheduling = () => {
 
         setLoading(true);
         try {
-            const resp = await fetch(`${LOCAL_SERVER_URL}/api/schedules`, {
+            const resp = await fetch(`${localServerUrl}/api/schedules`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ type: newType, time: newTime, days: newDays })
@@ -115,8 +134,8 @@ const Scheduling = () => {
     const handleDelete = async (id: string) => {
         if (!window.confirm("Delete this schedule?")) return;
         try {
-            const resp = await fetch(`${LOCAL_SERVER_URL}/api/schedules/${id}`, { method: 'DELETE' });
-            if (resp.ok) fetchSchedules();
+            const resp = await fetch(`${localServerUrl}/api/schedules/${id}`, { method: 'DELETE' });
+            if (resp.ok) fetchSchedules(localServerUrl);
         } catch (e) {
             alert("Error deleting schedule.");
         }

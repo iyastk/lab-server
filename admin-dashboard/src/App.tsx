@@ -9,6 +9,9 @@ const History = lazy(() => import('./pages/History'));
 const Download = lazy(() => import('./pages/Download'));
 const Scheduling = lazy(() => import('./pages/Scheduling'));
 const Settings = lazy(() => import('./pages/Settings'));
+const ClientInstall = lazy(() => import('./pages/ClientInstall'));
+const ServerInstall = lazy(() => import('./pages/ServerInstall'));
+const ExtensionInstall = lazy(() => import('./pages/ExtensionInstall'));
 
 const Fallback = () => (
     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -29,6 +32,9 @@ function App() {
                         <Route path="download" element={<Download />} />
                         <Route path="automation" element={<Scheduling />} />
                         <Route path="settings" element={<Settings />} />
+                        <Route path="install/client" element={<ClientInstall />} />
+                        <Route path="install/server" element={<ServerInstall />} />
+                        <Route path="install/extension" element={<ExtensionInstall />} />
                     </Route>
                 </Routes>
                 {/* Deployment Sync Indicator */}

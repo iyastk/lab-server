@@ -1,0 +1,6 @@
+{
+    "FirebaseProjectId": "lab-server-f6d09",
+    "AdminUsername": "admin",
+    "AdminPassword": "labsecurity",
+    "ExtensionListenerPort": 4000
+}

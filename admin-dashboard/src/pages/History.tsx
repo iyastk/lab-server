@@ -233,6 +233,7 @@ const History = () => {
     const [loadingLocal, setLoadingLocal] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [isSyncing, setIsSyncing] = useState(false);
+    const [localServerUrl, setLocalServerUrl] = useState<string | null>(null); // New state for dynamic server URL
 
     // AI state
     const [aiReport, setAiReport] = useState('');
@@ -243,6 +244,27 @@ const History = () => {
     const categories = ['All', 'YouTube', 'Search', 'Web Browsing', 'General App', 'Coding', 'Social', 'Gaming', 'VIOLATION'];
     const allDocsRef = useRef<HistoryLog[]>([]); // keep raw cloud docs for offload
 
+    // Load dynamic server URL from Firebase settings
+    useEffect(() => {
+        const fetchServerUrl = async () => {
+            try {
+                const settingsRef = doc(db, 'settings', 'network');
+                const settingsDoc = await getDoc(settingsRef);
+
+                let currentServerUrl = 'http://localhost:5000'; // fallback
+                if (settingsDoc.exists() && settingsDoc.data()?.serverAddress) {
+                    currentServerUrl = settingsDoc.data().serverAddress;
+                }
+                setLocalServerUrl(currentServerUrl);
+            } catch (err) {
+                console.error("Error fetching network settings:", err);
+                setLocalServerUrl('http://localhost:5000'); // Use fallback on error
+            }
+        };
+        fetchServerUrl();
+    }, []);
+
+
     // Load students
     useEffect(() => {
         const q = query(collection(db, 'students'), orderBy('studentId', 'asc'));
@@ -252,7 +274,7 @@ const History = () => {
 
     // Load cloud logs + auto-offload
     useEffect(() => {
-        if (!selected) return;
+        if (!selected || !localServerUrl) return; // Wait for localServerUrl to be set
         setLoadingCloud(true);
         setCloudLogs([]); setCloudSessions([]); setActiveSession(null);
         setAiReport(''); setShowReport(false);
@@ -279,20 +301,20 @@ const History = () => {
 
             // Auto-offload sessions beyond MAX_CLOUD_SESSIONS
             if (allSessions.length > MAX_CLOUD_SESSIONS) {
-                await offloadOldSessions(selected.studentId, docs, sessionsToKeep);
+                await offloadOldSessions(selected.studentId, docs, sessionsToKeep, localServerUrl);
             }
         }, () => setLoadingCloud(false));
 
         return () => unsub();
-    }, [selected]);
+    }, [selected, localServerUrl]); // Add localServerUrl to dependencies
 
     // Load local/archived logs (try both IDs to cover old+new client versions)
     useEffect(() => {
-        if (!selected) return;
+        if (!selected || !localServerUrl) return; // Wait for localServerUrl to be set
         setLoadingLocal(true);
         const ids = [selected.studentId, selected.id].filter(Boolean);
         Promise.all(
-            ids.map(id => fetch(`${LOCAL_SERVER_URL}/api/history?studentId=${id}`).then(r => r.ok ? r.json() : []).catch(() => []))
+            ids.map(id => fetch(`${localServerUrl}/api/history?studentId=${id}`).then(r => r.ok ? r.json() : []).catch(() => []))
         ).then(results => {
             // Merge and de-duplicate by id
             const seen = new Set();
@@ -300,7 +322,7 @@ const History = () => {
             setLocalLogs(merged);
             setLocalSessions(groupSessions(merged));
         }).finally(() => setLoadingLocal(false));
-    }, [selected]);
+    }, [selected, localServerUrl]); // Add localServerUrl to dependencies
 
     // Combined data for full report
     const allLogs = useMemo(() => [...cloudLogs, ...localLogs], [cloudLogs, localLogs]);
@@ -332,11 +354,15 @@ const History = () => {
 
     const handleManualOffload = async () => {
         if (!window.confirm('Move all cloud logs to Local Server?')) return;
+        if (!localServerUrl) {
+            alert('Local server URL not available. Please check settings.');
+            return;
+        }
         setIsSyncing(true);
         try {
             const snapshot = await getDocs(collection(db, 'history'));
             const logs = snapshot.docs.map(d => ({ id: d.id, ...d.data(), timestamp: toDate(d.data().timestamp)?.toISOString() || d.data().timestamp }));
-            const resp = await fetch(`${LOCAL_SERVER_URL}/api/offload/logs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logs }) });
+            const resp = await fetch(`${localServerUrl}/api/offload/logs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logs }) });
             if (!resp.ok) throw new Error('Server rejected');
             const batch = writeBatch(db);
             snapshot.docs.forEach(d => batch.delete(d.ref));
@@ -429,7 +455,7 @@ const History = () => {
                         Firebase keeps last 5 sessions · older sessions auto-archived to local server · AI profile reports
                     </p>
                 </div>
-                <button onClick={handleManualOffload} disabled={isSyncing} className="btn btn-primary" style={{ fontSize: '0.83rem' }}>
+                <button onClick={handleManualOffload} disabled={isSyncing || !localServerUrl} className="btn btn-primary" style={{ fontSize: '0.83rem' }}>
                     <Database size={15} /> {isSyncing ? 'Archiving…' : 'Archive All Now'}
                 </button>
             </div>

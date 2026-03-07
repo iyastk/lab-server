@@ -14,6 +14,13 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+# Remove previous install if it exists
+echo "[0/5] Removing previous LabGuard installation (if any)..."
+systemctl stop labguard.service 2>/dev/null || true
+systemctl disable labguard.service 2>/dev/null || true
+rm -f /opt/labguard/labguard.py
+echo "  Previous version removed."
+
 # Install dependencies
 echo "[1/5] Installing Python dependencies..."
 apt-get update -q
@@ -26,7 +33,9 @@ mkdir -p /etc/labguard
 if [ ! -f /etc/labguard/config.json ]; then
   echo '{
   "projectId": "YOUR_FIREBASE_PROJECT_ID",
-  "apiKey": "YOUR_FIREBASE_API_KEY"
+  "apiKey": "YOUR_FIREBASE_API_KEY",
+  "pollIntervalSeconds": 60,
+  "isAdminPc": false
 }' > /etc/labguard/config.json
   echo "  ⚠️  Please edit /etc/labguard/config.json with your Firebase credentials."
 fi

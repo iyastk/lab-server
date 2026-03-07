@@ -20,3 +20,7 @@ ClientLocker/obj/
 publish/
 *.zip
 RELEASE_PACKAGE/
+# Build error logs
+build_err.txt
+build_errors.txt
+publish_errors.txt

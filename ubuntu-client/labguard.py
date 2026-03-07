@@ -28,8 +28,9 @@ FIREBASE_PROJECT = os.environ.get("FIREBASE_PROJECT", "your-firebase-project-id"
 FIREBASE_API_KEY = os.environ.get("FIREBASE_API_KEY", "your-firebase-api-key")
 BASE_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT}/databases/(default)/documents/"
 PC_NAME = socket.gethostname()
-POLL_INTERVAL = 2         # seconds between command polls
+POLL_INTERVAL = 60        # seconds — overridden by config.json
 SCREENSHOT_QUALITY = 30   # JPEG quality (lower = smaller)
+IS_ADMIN_PC = False        # set in config.json to skip bulk shutdown/restart
 SESSION_ACTIVE = False
 CURRENT_STUDENT = None
 DAILY_REMAINING = 0
@@ -41,12 +42,14 @@ CONFIG_FILE = "/etc/labguard/config.json"
 
 # ── LOAD CONFIG ─────────────────────────────────────────────────────────────
 def load_config():
-    global FIREBASE_PROJECT, FIREBASE_API_KEY, BASE_URL
+    global FIREBASE_PROJECT, FIREBASE_API_KEY, BASE_URL, POLL_INTERVAL, IS_ADMIN_PC
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE) as f:
             cfg = json.load(f)
             FIREBASE_PROJECT = cfg.get("projectId", FIREBASE_PROJECT)
             FIREBASE_API_KEY = cfg.get("apiKey", FIREBASE_API_KEY)
+            POLL_INTERVAL    = cfg.get("pollIntervalSeconds", 60)
+            IS_ADMIN_PC      = cfg.get("isAdminPc", False)
             BASE_URL = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT}/databases/(default)/documents/"
 
 # ── FIREBASE HELPERS ────────────────────────────────────────────────────────
@@ -214,10 +217,16 @@ def handle_command(cmd):
     elif cmd_lower == "unlock":
         unlock_screen()
     elif cmd_lower == "shutdown":
+        if IS_ADMIN_PC:
+            print("[LabGuard] Shutdown ignored — admin PC")
+            return
         os.system("notify-send 'LabGuard' 'PC will shutdown in 10s (Admin)'")
         time.sleep(10)
         subprocess.run(["sudo", "shutdown", "-h", "now"])
     elif cmd_lower == "restart":
+        if IS_ADMIN_PC:
+            print("[LabGuard] Restart ignored — admin PC")
+            return
         os.system("notify-send 'LabGuard' 'PC will restart in 10s (Admin)'")
         time.sleep(10)
         subprocess.run(["sudo", "shutdown", "-r", "now"])
@@ -285,13 +294,13 @@ def handle_login(student_id, password):
 # ── TERMINAL UI (Fallback / Kiosk mode) ─────────────────────────────────────────
 def terminal_ui():
     print("=" * 50)
-    print("  LabGuard Ubuntu Client v1.0")
+    print("  LabGuard Ubuntu Client v2.1")
     print("=" * 50)
     while not SESSION_ACTIVE:
         student_id = input("Student ID: ").strip()
         password = input("Password: ").strip()
-        if student_id == "Admin" and password == "nopassword":
-            print("[Admin] Escape gate activated.")
+        if student_id == "admin" and password == "labsecurity":
+            print("[Admin] Admin bypass — no restrictions.")
             return
         if handle_login(student_id, password):
             print(f"[LabGuard] Welcome, {student_id}!")

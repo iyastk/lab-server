@@ -137,6 +137,7 @@ namespace LabGuardInstaller
             {
                 MessageBox.Show("Installation failed: " + ex.Message);
             }
+        }
 
         private async System.Threading.Tasks.Task InstallServerDependencies(string serverPath)
         {

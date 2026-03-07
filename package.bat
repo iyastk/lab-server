@@ -4,7 +4,9 @@ echo ==============================================
 echo   LABGUARD HYBRID PACKAGER (v1.1)
 echo ==============================================
 
-set ROOT_DIR=c:\Users\iyas\Desktop\lab server
+set "ROOT_DIR=%~dp0"
+REM Strip trailing backslash from %~dp0
+if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
 set CLIENT_DIR=%ROOT_DIR%\ClientLocker
 set LOCAL_SERVER_DIR=%ROOT_DIR%\local-server
 set DASHBOARD_PUBLIC=%ROOT_DIR%\admin-dashboard\public

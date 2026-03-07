@@ -343,6 +343,7 @@ const Monitoring = () => {
     const [isGridView, setIsGridView] = useState(true);
     const [selectedStationId, setSelectedStationId] = useState<string | null>(null);
     const [showGlobalActions, setShowGlobalActions] = useState(false);
+    const [localServerUrl, setLocalServerUrl] = useState<string>('http://localhost:5000');
 
     useEffect(() => {
         const unsubscribe = onSnapshot(collection(db, 'stations'), (snapshot) => {
@@ -355,6 +356,13 @@ const Monitoring = () => {
             if (snap.exists()) {
                 const data = snap.data() as { bannedKeywords: string; blockUninstalls: boolean };
                 setSecuritySettings(data);
+            }
+        });
+
+        // Fetch network settings for dynamic server URL
+        getDoc(doc(db, 'settings', 'network')).then(snap => {
+            if (snap.exists() && snap.data().serverAddress) {
+                setLocalServerUrl(snap.data().serverAddress);
             }
         });
 
@@ -438,7 +446,7 @@ const Monitoring = () => {
                 const formData = new FormData();
                 formData.append('file', file);
 
-                const response = await fetch(`http://${localServerIp}:5000/api/files/upload`, {
+                const response = await fetch(`${localServerUrl}/api/files/upload`, {
                     method: 'POST',
                     body: formData
                 });
@@ -474,7 +482,7 @@ const Monitoring = () => {
         }
 
         try {
-            const response = await fetch(`http://${localServerIp}:5000/api/wake`, {
+            const response = await fetch(`${localServerUrl}/api/wake`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ macAddress })

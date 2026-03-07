@@ -84,7 +84,7 @@ namespace ClientLocker
             heartbeatTimer.Start();
 
             _commandTimer = new System.Windows.Threading.DispatcherTimer();
-            _commandTimer.Interval = TimeSpan.FromSeconds(3); // Reduced from 5s for snappier command response
+            _commandTimer.Interval = TimeSpan.FromSeconds(LabGuardConfig.CommandPollIntervalSeconds);
             _commandTimer.Tick += CommandTimer_Tick;
             _commandTimer.Start();
 
@@ -103,7 +103,11 @@ namespace ClientLocker
             // Initial fetch
             Task.Run(async () => await SyncGlobalSecurity());
 
+            // Start Wake On LAN Proxy Listener
+            _firebase.StartWOLListener();
+
             RegisterForStartup();
+            DisableShutdownUI();
         }
 
         private void RegisterForStartup()
@@ -143,16 +147,42 @@ namespace ClientLocker
         {
             if (msg == WM_QUERYENDSESSION || msg == WM_ENDSESSION)
             {
+                // Allow only if an admin command explicitly permitted it
                 if (_allowShutdown) return IntPtr.Zero;
+
+                // Block shutdown/restart at all times (lock screen or active session)
+                handled = true;
                 if (_currentStudent != null)
                 {
-                    handled = true;
-                    Application.Current.Dispatcher.Invoke(() => 
+                    Application.Current.Dispatcher.Invoke(() =>
                         MessageBox.Show("Shutdown is not allowed while a session is active.", "LabGuard - Blocked"));
-                    return new IntPtr(0);
                 }
+                return new IntPtr(0);
             }
             return IntPtr.Zero;
+        }
+
+        private void DisableShutdownUI()
+        {
+            try
+            {
+                // Hide the power button in the Windows Start menu for this user
+                using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer");
+                key?.SetValue("NoClose", 1, Microsoft.Win32.RegistryValueKind.DWord);
+            }
+            catch { }
+        }
+
+        private void RestoreShutdownUI()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer", true);
+                key?.DeleteValue("NoClose", false);
+            }
+            catch { }
         }
 
         private async void SessionTimer_Tick(object? sender, EventArgs e)
@@ -220,6 +250,10 @@ namespace ClientLocker
             _sessionTimer.Stop();
             _monitor.Stop();
             StopFileWatchers();
+            
+            // Re-enable proxying WOL when locked out (screen is frozen)
+            _firebase.StartWOLListener();
+            
             this.Show();
             this.Topmost = true;
             _hook.Hook();
@@ -240,11 +274,21 @@ namespace ClientLocker
                         Application.Current.Dispatcher.Invoke(() => UnlockPC());
                         break;
                     case "shutdown":
+                        if (LabGuardConfig.IsAdminPc)
+                        {
+                            SetStatus("⚠️ Shutdown ignored — this is the admin PC.");
+                            break;
+                        }
                         SetStatus("🔌 Command: Shutting down...");
                         _allowShutdown = true;
                         Process.Start("shutdown", "/s /t 10");
                         break;
                     case "restart":
+                        if (LabGuardConfig.IsAdminPc)
+                        {
+                            SetStatus("⚠️ Restart ignored — this is the admin PC.");
+                            break;
+                        }
                         SetStatus("🔄 Command: Restarting...");
                         _allowShutdown = true;
                         Process.Start("shutdown", "/r /t 10");
@@ -373,7 +417,7 @@ namespace ClientLocker
             string password = PasswordInput.Password;
 
             // Admin login — unlimited time, no restrictions
-            if (id == "admin" && password == "nopassword")
+            if (id == LabGuardConfig.AdminUsername && password == LabGuardConfig.AdminPassword)
             {
                 _isAdmin = true;
                 _hook.Unhook();
@@ -450,6 +494,10 @@ namespace ClientLocker
         private async void UnlockPC()
         {
             _isLocked = false;
+            
+            // Stop proxying WOL while user is actively working to save resources
+            _firebase.StopWOLListener();
+
             _monitor.BlockUninstalls = await _firebase.GetGlobalSecuritySettings();
             _sessionTimer.Start();
             _monitor.Start();
@@ -535,7 +583,8 @@ namespace ClientLocker
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
             StopFileWatchers();
-            WebsiteBlocker.Cleanup(); // Remove blocks on exit if desired, or keep them
+            RestoreShutdownUI(); // Clean up Start menu power button block on exit
+            WebsiteBlocker.Cleanup();
             base.OnClosing(e);
         }
 
