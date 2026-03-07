@@ -4,6 +4,9 @@ import {
     Server, Download, CheckCircle, ChevronRight, ChevronLeft,
     ArrowLeft, AlertCircle, Copy, Check, Terminal, Zap, Database
 } from 'lucide-react';
+import { db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { useEffect } from 'react';
 
 const steps = [
     {
@@ -54,6 +57,17 @@ const CopyBlock = ({ code }: { code: string }) => {
 const ServerInstallPage = () => {
     const navigate = useNavigate();
     const [activeStep, setActiveStep] = useState(0);
+    const [localServerUrl, setLocalServerUrl] = useState<string>('http://localhost:5000');
+
+    useEffect(() => {
+        getDoc(doc(db, 'settings', 'network')).then(snap => {
+            if (snap.exists() && snap.data().serverAddress) {
+                setLocalServerUrl(snap.data().serverAddress);
+            }
+        });
+    }, []);
+
+    const downloadUrl = `${localServerUrl}/installers/LabGuard_Server_Setup.exe`;
 
     return (
         <div style={{ maxWidth: '860px', margin: '0 auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '28px' }}>
@@ -76,7 +90,7 @@ const ServerInstallPage = () => {
                     </div>
                 </div>
                 <a
-                    href="/LabGuard_Server_Setup.exe"
+                    href={downloadUrl}
                     download="LabGuard_Server_Setup.exe"
                     className="btn"
                     style={{ padding: '13px 24px', fontSize: '0.95rem', gap: '9px', textDecoration: 'none', background: 'var(--success)', color: 'white', border: 'none' }}

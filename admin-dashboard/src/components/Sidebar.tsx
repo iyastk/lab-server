@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Users, Monitor, Settings, LogOut, ShieldCheck, Clock, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Users, Monitor, Settings, LogOut, ShieldCheck, Clock, Menu, X, BarChart2 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
 const Sidebar = () => {
@@ -9,6 +9,7 @@ const Sidebar = () => {
         { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/' },
         { icon: <Monitor size={20} />, label: 'Live Monitoring', path: '/monitoring' },
         { icon: <Clock size={20} />, label: 'Automation', path: '/automation' },
+        { icon: <BarChart2 size={20} />, label: 'Analytics', path: '/analytics' },
         { icon: <LayoutDashboard size={20} />, label: 'History', path: '/history' },
         { icon: <Users size={20} />, label: 'User Management', path: '/users' },
         { icon: <ShieldCheck size={20} />, label: 'Download Client', path: '/download' },

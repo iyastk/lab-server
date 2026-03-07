@@ -18,6 +18,7 @@ export interface Student {
     id: string;
     studentId: string;
     name?: string;
+    classGroup?: string; // e.g. "Class 9A", "Grade 10"
     weeklyTime?: number;      // quota in minutes
     dailyTime?: number;       // quota in minutes
     dailyRemainingTime?: number;  // seconds remaining today

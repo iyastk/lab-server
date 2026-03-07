@@ -12,6 +12,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const ClientInstall = lazy(() => import('./pages/ClientInstall'));
 const ServerInstall = lazy(() => import('./pages/ServerInstall'));
 const ExtensionInstall = lazy(() => import('./pages/ExtensionInstall'));
+const Analytics = lazy(() => import('./pages/Analytics'));
 
 const Fallback = () => (
     <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -35,6 +36,7 @@ function App() {
                         <Route path="install/client" element={<ClientInstall />} />
                         <Route path="install/server" element={<ServerInstall />} />
                         <Route path="install/extension" element={<ExtensionInstall />} />
+                        <Route path="analytics" element={<Analytics />} />
                     </Route>
                 </Routes>
                 {/* Deployment Sync Indicator */}

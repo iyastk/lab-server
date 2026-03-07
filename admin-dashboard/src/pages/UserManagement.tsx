@@ -5,9 +5,9 @@ import { UserPlus, Clock, Trash2, Edit3, AlertTriangle, Check, X, Search } from 
 import { Student } from '../types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface NewUser { name: string; studentId: string; password: string; weeklyTime: number; dailyTime: number; }
-interface BulkConfig { prefix: string; start: number; end: number; weeklyTime: number; dailyTime: number; }
-interface EditState { id: string; field: 'weeklyTime' | 'dailyTime' | 'name'; value: string; }
+interface NewUser { name: string; studentId: string; password: string; classGroup: string; weeklyTime: number; dailyTime: number; }
+interface BulkConfig { prefix: string; start: number; end: number; classGroup: string; weeklyTime: number; dailyTime: number; }
+interface EditState { id: string; field: 'weeklyTime' | 'dailyTime' | 'name' | 'classGroup'; value: string; }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtMin = (sec: number) => `${Math.floor(sec / 60)}m`;
@@ -30,7 +30,7 @@ const StudentRow = memo(({ user, onDelete, onEdit }: StudentRowProps) => {
 
     const save = () => {
         if (!editing) return;
-        const val = editing.field === 'name' ? editing.value : parseInt(editing.value) * 60;
+        const val = (editing.field === 'name' || editing.field === 'classGroup') ? editing.value : parseInt(editing.value) * 60;
         onEdit(user.id, editing.field, val);
         setEditing(null);
     };
@@ -56,6 +56,21 @@ const StudentRow = memo(({ user, onDelete, onEdit }: StudentRowProps) => {
             </td>
             {/* ID */}
             <td style={{ padding: '12px 15px', color: 'var(--text-muted)', fontSize: '0.88rem' }}>{user.studentId}</td>
+            {/* Class */}
+            <td style={{ padding: '12px 15px' }}>
+                {editing?.field === 'classGroup' ? (
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                        <input style={{ ...inputCls, width: '90px', padding: '5px 8px', fontSize: '0.8rem' }}
+                            value={editing.value} onChange={e => setEditing({ ...editing, value: e.target.value })} autoFocus />
+                        <button className="btn btn-sm" onClick={save}><Check size={11} /></button>
+                    </div>
+                ) : (
+                    <span style={{ fontSize: '0.82rem', color: 'var(--primary)', fontWeight: 'bold', background: 'rgba(79,70,229,0.1)', padding: '2px 8px', borderRadius: '4px' }}
+                        onClick={() => setEditing({ id: user.id, field: 'classGroup', value: user.classGroup ?? '' })}>
+                        {user.classGroup || 'N/A'}
+                    </span>
+                )}
+            </td>
             {/* Remaining */}
             <td style={{ padding: '12px 15px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -98,10 +113,11 @@ const StudentRow = memo(({ user, onDelete, onEdit }: StudentRowProps) => {
 const UserManagement = () => {
     const [users, setUsers] = useState<Student[]>([]);
     const [search, setSearch] = useState('');
-    const [newUser, setNewUser] = useState<NewUser>({ name: '', studentId: '', password: '', weeklyTime: 60, dailyTime: 30 });
-    const [bulkConfig, setBulkConfig] = useState<BulkConfig>({ prefix: 'class9_', start: 1, end: 40, weeklyTime: 60, dailyTime: 30 });
+    const [newUser, setNewUser] = useState<NewUser>({ name: '', studentId: '', password: '', classGroup: '', weeklyTime: 60, dailyTime: 30 });
+    const [bulkConfig, setBulkConfig] = useState<BulkConfig>({ prefix: 'class9_', start: 1, end: 40, classGroup: 'Class 9', weeklyTime: 60, dailyTime: 30 });
     const [loading, setLoading] = useState(true);
     const [bulkLoading, setBulkLoading] = useState(false);
+    const [importing, setImporting] = useState(false);
 
     useEffect(() => {
         const q = query(collection(db, 'students'), orderBy('studentId', 'asc'));
@@ -130,7 +146,7 @@ const UserManagement = () => {
                 status: 'offline',
                 createdAt: new Date(),
             });
-            setNewUser({ name: '', studentId: '', password: '', weeklyTime: 60, dailyTime: 30 });
+            setNewUser({ name: '', studentId: '', password: '', classGroup: newUser.classGroup, weeklyTime: 60, dailyTime: 30 });
         } catch (err) { console.error('Add student error:', err); }
     };
 
@@ -147,6 +163,8 @@ const UserManagement = () => {
                 await updateDoc(doc(db, 'students', id), { dailyRemainingTime: value as number });
             } else if (field === 'name') {
                 await updateDoc(doc(db, 'students', id), { name: value as string });
+            } else if (field === 'classGroup') {
+                await updateDoc(doc(db, 'students', id), { classGroup: value as string });
             }
         } catch (err) { console.error('Edit error:', err); }
     }, []);
@@ -179,6 +197,7 @@ const UserManagement = () => {
                     const ref = doc(collection(db, 'students'));
                     batch.set(ref, {
                         name: `Student ${id}`, studentId: id, password: id,
+                        classGroup: bulkConfig.classGroup,
                         weeklyTime: bulkConfig.weeklyTime, dailyTime: bulkConfig.dailyTime,
                         remainingTime: bulkConfig.weeklyTime * 60,
                         dailyRemainingTime: bulkConfig.dailyTime * 60,
@@ -190,6 +209,66 @@ const UserManagement = () => {
             alert(`✅ ${count} accounts created.`);
         } catch (err) { console.error('Bulk create error:', err); }
         setBulkLoading(false);
+    };
+
+    const handleCsvImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setImporting(true);
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const csv = event.target?.result as string;
+            const lines = csv.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+            // Expected format: Name, StudentID, Class, Password, WeeklyMin, DailyMin
+            // Skip header if it looks like one
+            const startIndex = (lines[0].toLowerCase().includes('name') || lines[0].toLowerCase().includes('id')) ? 1 : 0;
+
+            const studentsToAdd = lines.slice(startIndex).map(line => {
+                const [name, id, className, pwd, weekly, daily] = line.split(',').map(s => s?.trim());
+                if (!id) return null;
+                const w = parseInt(weekly) || bulkConfig.weeklyTime;
+                const d = parseInt(daily) || bulkConfig.dailyTime;
+                return {
+                    name: name || `Student ${id}`,
+                    studentId: id,
+                    password: pwd || id,
+                    classGroup: className || 'Imported',
+                    weeklyTime: w,
+                    dailyTime: d,
+                    remainingTime: w * 60,
+                    dailyRemainingTime: d * 60,
+                    usernameChanges: 0,
+                    status: 'offline',
+                    createdAt: new Date()
+                };
+            }).filter(s => s !== null);
+
+            if (!window.confirm(`Import ${studentsToAdd.length} students from CSV?`)) {
+                setImporting(false);
+                return;
+            }
+
+            try {
+                const CHUNK = 499;
+                for (let i = 0; i < studentsToAdd.length; i += CHUNK) {
+                    const batch = writeBatch(db);
+                    const chunk = studentsToAdd.slice(i, i + CHUNK);
+                    chunk.forEach(s => {
+                        const ref = doc(collection(db, 'students'));
+                        batch.set(ref, s);
+                    });
+                    await batch.commit();
+                }
+                alert(`✅ ${studentsToAdd.length} students imported successfully.`);
+            } catch (err) {
+                console.error("Import error:", err);
+                alert("Import failed. Check CSV format.");
+            }
+            setImporting(false);
+        };
+        reader.readAsText(file);
     };
 
     const numInput = (label: string, val: number, onChange: (v: number) => void, width = '90px') => (
@@ -215,6 +294,7 @@ const UserManagement = () => {
                 <form onSubmit={handleAddUser} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                     {[
                         { ph: 'Full Name', key: 'name' as const, type: 'text', flex: '2' },
+                        { ph: 'Class (e.g. 9A)', key: 'classGroup' as const, type: 'text', flex: '1' },
                         { ph: 'Student ID', key: 'studentId' as const, type: 'text', flex: '1' },
                         { ph: 'Password', key: 'password' as const, type: 'password', flex: '1' },
                     ].map(({ ph, key, type, flex }) => (
@@ -228,6 +308,12 @@ const UserManagement = () => {
                         {numInput('Daily (min)', newUser.dailyTime, v => setNewUser(p => ({ ...p, dailyTime: v })))}
                     </div>
                     <button type="submit" className="btn btn-primary" style={{ height: '42px' }}>Add Student</button>
+                    <div style={{ marginLeft: 'auto' }}>
+                        <input type="file" id="csv-import" accept=".csv" style={{ display: 'none' }} onChange={handleCsvImport} />
+                        <label htmlFor="csv-import" className="btn" style={{ height: '42px', background: 'rgba(59,130,246,0.1)', color: 'var(--primary)', border: '1px solid rgba(59,130,246,0.2)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                            {importing ? 'Importing...' : 'Excel/CSV Import'}
+                        </label>
+                    </div>
                 </form>
             </div>
 
@@ -241,6 +327,11 @@ const UserManagement = () => {
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID Prefix</label>
                         <input style={{ ...inputCls }} value={bulkConfig.prefix}
                             onChange={e => setBulkConfig(p => ({ ...p, prefix: e.target.value }))} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', flex: 1, minWidth: '100px' }}>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Class Name</label>
+                        <input style={{ ...inputCls }} value={bulkConfig.classGroup}
+                            onChange={e => setBulkConfig(p => ({ ...p, classGroup: e.target.value }))} />
                     </div>
                     {numInput('Start #', bulkConfig.start, v => setBulkConfig(p => ({ ...p, start: v })), '75px')}
                     {numInput('End #', bulkConfig.end, v => setBulkConfig(p => ({ ...p, end: v })), '75px')}
@@ -280,7 +371,7 @@ const UserManagement = () => {
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                             <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-                                {['Name', 'Student ID', 'Remaining (W/D)', 'Renames', 'Actions'].map(h => (
+                                {['Name', 'Student ID', 'Class', 'Remaining (W/D)', 'Renames', 'Actions'].map(h => (
                                     <th key={h} style={{ padding: '10px 15px', textAlign: 'left', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
                                 ))}
                             </tr>
