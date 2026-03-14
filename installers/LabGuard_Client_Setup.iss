@@ -73,25 +73,42 @@ Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""LabGuard
 const
   DOTNET_RUNTIME_URL = 'https://download.visualstudio.microsoft.com/download/pr/windowsdesktop-runtime-6.0.36-win-x64.exe';
 
+{ ── Kill any running LabGuard processes so the installer can replace files ── }
+procedure KillLabGuardProcesses();
+var
+  ResultCode: Integer;
+begin
+  { Kill the main client — ignore errors if it is not running }
+  Exec('taskkill.exe', '/f /im ClientLocker.exe',     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { Kill the watchdog too, otherwise it will restart the client moments later }
+  Exec('taskkill.exe', '/f /im LabGuardWatchdog.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { Brief pause so the OS fully releases the file handles before extraction starts }
+  Sleep(1500);
+end;
+
 procedure ExtractDotnetCheckScript();
 var
   ScriptPath: string;
   Lines: TArrayOfString;
 begin
   ScriptPath := ExpandConstant('{tmp}\dotnet_check.bat');
-  SetArrayLength(Lines, 12);
+  SetArrayLength(Lines, 16);
   Lines[0]  := '@echo off';
-  Lines[1]  := 'FOR /F "tokens=*" %%i IN (''dotnet --list-runtimes 2^>nul'') DO (';
-  Lines[2]  := '  echo %%i | findstr /C:"Microsoft.WindowsDesktop.App 6." >nul';
-  Lines[3]  := '  if not errorlevel 1 goto :found';
-  Lines[4]  := ')';
+  Lines[1]  := 'set "RT_PATH=%TEMP%\dotnet6_runtime.exe"';
+  Lines[2]  := 'dotnet --list-runtimes 2>nul | findstr /C:"Microsoft.WindowsDesktop.App 6." >nul';
+  Lines[3]  := 'if not errorlevel 1 goto :found';
+  Lines[4]  := '';
   Lines[5]  := ':install';
   Lines[6]  := 'echo .NET 6 Desktop Runtime not found. Downloading...';
-  Lines[7]  := 'powershell -Command "Invoke-WebRequest -Uri ''' + DOTNET_RUNTIME_URL + ''' -OutFile ''%TEMP%\dotnet6_runtime.exe'' -UseBasicParsing"';
-  Lines[8]  := 'start /wait %TEMP%\dotnet6_runtime.exe /install /quiet /norestart';
-  Lines[9]  := 'goto :end';
-  Lines[10] := ':found';
-  Lines[11] := ':end';
+  Lines[7]  := 'powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { Invoke-WebRequest -Uri ''' + DOTNET_RUNTIME_URL + ''' -OutFile ''%RT_PATH%'' -UseBasicParsing -ErrorAction Stop } catch { exit 1 }"';
+  Lines[8]  := 'if errorlevel 1 (';
+  Lines[9]  := '  echo DOWNLOAD FAILED! Please ensure you have internet access.';
+  Lines[10] := '  pause';
+  Lines[11] := '  exit /b 1';
+  Lines[12] := ')';
+  Lines[13] := 'if exist "%RT_PATH%" start /wait "" "%RT_PATH%" /install /quiet /norestart';
+  Lines[14] := ':found';
+  Lines[15] := ':end';
   SaveStringsToFile(ScriptPath, Lines, False);
 end;
 
@@ -102,6 +119,10 @@ var
   AppIdKey: String;
 begin
   Result := True;
+
+  { ── FIRST: stop all LabGuard processes so files can be replaced ── }
+  KillLabGuardProcesses();
+
   AppIdKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}_is1';
 
   // Check HKLM first (admin install), then HKCU (user install)
@@ -113,5 +134,14 @@ begin
     // Silently remove the old version before installing the new one
     Exec(RemoveQuotes(UninstallStr), '/SILENT /NORESTART', '', SW_HIDE,
          ewWaitUntilTerminated, ResultCode);
+    { Kill again — the old uninstaller may have re-triggered the watchdog }
+    KillLabGuardProcesses();
   end;
+end;
+
+{ ── Extra safety: kill processes right before Inno Setup extracts files ── }
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    KillLabGuardProcesses();
 end;

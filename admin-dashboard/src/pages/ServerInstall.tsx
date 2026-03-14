@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Server, Download, CheckCircle, ChevronRight, ChevronLeft,
-    ArrowLeft, AlertCircle, Copy, Check, Terminal, Zap, Database
+    ArrowLeft, AlertCircle, Copy, Check, Terminal, Zap, Database, Activity
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -173,6 +173,21 @@ const ServerInstallPage = () => {
                     <CopyBlock code="pm2 restart labguard-server" />
                     <CopyBlock code="pm2 logs labguard-server" />
                 </div>
+            </div>
+
+            {/* Connection Status */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--glass)', fontSize: '0.82rem' }}>
+                <Activity size={14} color={localServerUrl.includes('localhost') ? '#f59e0b' : 'var(--success)'} />
+                <span style={{ color: 'var(--text-muted)' }}>Current Server URL:</span>
+                <code style={{ color: 'var(--text-main)' }}>{localServerUrl}</code>
+                {localServerUrl.includes('localhost') && (
+                    <span style={{ color: '#f59e0b', fontSize: '0.75rem', marginLeft: 'auto' }}>
+                        ⚠️ Currently using localhost.
+                        <button onClick={() => navigate('/settings')} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '0 4px', textDecoration: 'underline', fontSize: '0.75rem' }}>
+                            Update to IP in Settings
+                        </button>
+                    </span>
+                )}
             </div>
 
             {/* Warning */}

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Shield, Download, CheckCircle, ChevronRight, ChevronLeft,
-    ArrowLeft, AlertCircle, Copy, Check, Terminal, ExternalLink
+    ArrowLeft, AlertCircle, Copy, Check, Terminal, ExternalLink, Activity
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -164,6 +164,21 @@ const ClientInstallPage = () => {
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '14px' }}>Copy the installer to a USB drive or shared folder, then run silently from an admin command line on each PC:</p>
                 <CopyBlock code='LabGuard_Client_Setup.exe /SILENT /NORESTART' />
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '10px' }}>/SILENT mode shows a progress bar. Use /VERYSILENT to install with no UI at all.</p>
+            </div>
+
+            {/* Connection Status */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid var(--glass)', fontSize: '0.82rem' }}>
+                <Activity size={14} color={localServerUrl.includes('localhost') ? '#f59e0b' : 'var(--success)'} />
+                <span style={{ color: 'var(--text-muted)' }}>Current Server URL:</span>
+                <code style={{ color: 'var(--text-main)' }}>{localServerUrl}</code>
+                {localServerUrl.includes('localhost') && (
+                    <span style={{ color: '#f59e0b', fontSize: '0.75rem', marginLeft: 'auto' }}>
+                        ⚠️ Currently using localhost.
+                        <button onClick={() => navigate('/settings')} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', padding: '0 4px', textDecoration: 'underline', fontSize: '0.75rem' }}>
+                            Update to IP in Settings
+                        </button>
+                    </span>
+                )}
             </div>
 
             {/* Warning */}

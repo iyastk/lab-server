@@ -41,7 +41,7 @@ function App() {
                 </Routes>
                 {/* Deployment Sync Indicator */}
                 <div style={{ position: 'fixed', bottom: '10px', right: '10px', fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.5, pointerEvents: 'none', zIndex: 10000 }}>
-                    LabGuard Admin v1.9.2 (Unified Controls)
+                    LabGuard Admin v2.0.0 (Analytics Update)
                 </div>
             </Suspense>
         </Router>

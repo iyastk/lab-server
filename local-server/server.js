@@ -18,6 +18,11 @@ const SERVER_START_TIME = Date.now();
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 
+// Serve installers statically
+const installersDir = path.join(__dirname, 'installers');
+if (!fs.existsSync(installersDir)) fs.mkdirSync(installersDir);
+app.use('/installers', express.static(installersDir));
+
 // root route for Status Dashboard
 app.get('/', (req, res) => {
     const uptime = Math.floor((Date.now() - SERVER_START_TIME) / 1000);

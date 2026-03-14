@@ -62,6 +62,9 @@ const SettingsPage = () => {
     const [blockUninstalls, setBlockUninstalls] = useState(true);
     const [screenshotInterval, setScreenshotInterval] = useState('30');
 
+    // Network Config
+    const [serverAddress, setServerAddress] = useState('http://localhost:5000');
+
     // Remote Management
     const [uninstallStatus, setUninstallStatus] = useState('');
     const [isUninstalling, setIsUninstalling] = useState(false);
@@ -90,6 +93,12 @@ const SettingsPage = () => {
                     setBlockedWebsites(d.blockedWebsites ? d.blockedWebsites.split(',').filter((s: string) => s) : []);
                 }
 
+                // Network Config
+                const netSnap = await getDoc(doc(db, 'settings', 'network'));
+                if (netSnap.exists()) {
+                    setServerAddress(netSnap.data().serverAddress || 'http://localhost:5000');
+                }
+
                 // Load stations for uninstall picker
                 const stSnap = await getDocs(collection(db, 'stations'));
                 setStations(stSnap.docs.map(d => ({ id: d.id, ...d.data() } as Station)));
@@ -115,6 +124,11 @@ const SettingsPage = () => {
             await setDoc(doc(db, 'settings', 'global'), {
                 bannedKeywords: bannedKeywords.join(','),
                 blockedWebsites: blockedWebsites.join(','),
+            }, { merge: true });
+
+            // Network config
+            await setDoc(doc(db, 'settings', 'network'), {
+                serverAddress: serverAddress.trim() || 'http://localhost:5000',
             }, { merge: true });
 
             setSaved(true);
@@ -295,7 +309,21 @@ const SettingsPage = () => {
                 </div>
             </Section>
 
-            {/* 4. Remote Management */}
+            {/* 4. Network Configuration */}
+            <Section icon={WifiOff} title="Network Configuration" color="var(--brand-blue)">
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    Configure how other PCs in the lab connect to this Admin PC. Use your local IP address instead of "localhost" so other PCs can see the installers.
+                </p>
+                <Field label="Local Server Address" hint='Run "ipconfig" in CMD to find your IPv4. Format: http://192.168.x.x:5000'>
+                    <input style={inputStyle} value={serverAddress} onChange={e => setServerAddress(e.target.value)} placeholder="http://192.168.1.10:5000" />
+                </Field>
+                <div style={{ background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.2)', borderRadius: '8px', padding: '10px 14px', fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                    <Info size={14} style={{ flexShrink: 0, marginTop: '2px' }} color="var(--primary)" />
+                    This address is used to generate download links for the Client and Server installers. Ensure Port 5000 is open in your Firewall.
+                </div>
+            </Section>
+
+            {/* 5. Remote Management */}
             <Section icon={Wrench} title="Remote Management" color="var(--danger)">
                 <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     Remotely manage client installations. These actions are sent as commands to the connected client software.
@@ -376,12 +404,12 @@ const SettingsPage = () => {
                 </div>
             </Section>
 
-            {/* 5. About */}
+            {/* 6. About */}
             <Section icon={Info} title="About LabGuard" color="var(--brand-blue)">
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     {[
-                        { label: 'Dashboard Version', value: 'v1.9.2 (Unified Controls)' },
-                        { label: 'Client Version', value: 'v2.0 (Self-contained)' },
+                        { label: 'Dashboard Version', value: 'v2.1.0 (Analytics + Network Patch)' },
+                        { label: 'Client Version', value: 'v2.1 (Self-contained)' },
                         { label: 'Platform', value: 'Windows 10/11 + Firebase' },
                         { label: 'Database', value: 'Firestore (lab-server-f6d09)' },
                     ].map(({ label, value }) => (
